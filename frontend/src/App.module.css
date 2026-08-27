@@ -1,0 +1,3 @@
+.screen{
+  animation:var(--kf-screen-in) var(--d4) var(--ease-out) both;
+}

@@ -1,0 +1,12 @@
+.button{min-height:44px;height:44px;padding:0 18px;border-radius:var(--r-sm);display:inline-flex;align-items:center;justify-content:center;gap:9px;font-size:14px;font-weight:600;box-shadow:var(--shadow-xs);transition:transform var(--d2) var(--ease-out),box-shadow var(--d2) var(--ease-out),border-color var(--d2) var(--ease-out),background var(--d2) var(--ease-out),color var(--d2) var(--ease-out)}
+.primary{background:var(--text);color:#fff;border:1px solid var(--text)}
+.ghost{background:var(--surface);color:var(--text-secondary);border:1px solid var(--border)}
+.arrow{transition:transform var(--d2) var(--ease-out)}
+.button:active{transform:scale(.985)}
+.button:disabled{cursor:not-allowed;opacity:.55;transform:none}
+@media(hover:hover){
+  .button:hover{transform:translateY(-1px);box-shadow:var(--shadow-md)}
+  .ghost:hover{border-color:var(--border-strong);color:var(--text)}
+  .button:hover .arrow{transform:translateX(4px)}
+}
+@media(prefers-reduced-motion:reduce){.button,.arrow{transition:none}}
