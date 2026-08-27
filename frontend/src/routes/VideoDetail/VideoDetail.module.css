@@ -1,7 +1,7 @@
 .vd-top{padding:var(--s6) 0 var(--s5)}
 .back{font-size:13.5px;color:var(--text-tertiary);display:inline-flex;gap:7px;align-items:center;transition:all var(--d2) var(--ease-out)}
 .vd-metarow{display:flex;gap:8px;margin:var(--s4) 0 12px;flex-wrap:wrap}
-.mchip{font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:var(--r-pill);background:var(--surface-muted);color:var(--text-secondary)}
+.mchip{font:700 10.5px var(--mono);padding:5px 9px;border:1px solid var(--text);border-radius:0;background:var(--surface);color:var(--text-secondary);box-shadow:2px 2px 0 var(--brutal-blue)}
 .vd-top h1{font-size:clamp(30px,4.4vw,52px);letter-spacing:-.04em;line-height:1.02;max-width:18ch}
 .desc{margin-top:var(--s4);color:var(--text-secondary);font-size:15px;max-width:68ch}
 
@@ -26,9 +26,9 @@
 .pnow{margin-left:auto;opacity:.85;font-size:12px}
 
 .vd-actions{display:flex;align-items:center;gap:10px;margin-top:var(--s5);flex-wrap:wrap}
-.btn-ghost{height:38px;padding:0 15px;border:1px solid var(--border);border-radius:10px;background:var(--surface);font-size:13.5px;font-weight:500;color:var(--text-secondary);box-shadow:var(--shadow-xs);transition:transform var(--d2) var(--ease-out),box-shadow var(--d2) var(--ease-out),border-color var(--d2) var(--ease-out),color var(--d2) var(--ease-out);display:inline-flex;align-items:center;gap:8px}
-.btn-primary{height:42px;padding:0 20px;border-radius:var(--r-sm);background:var(--text);color:#fff;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:9px;box-shadow:var(--shadow-sm);transition:transform var(--d2) var(--ease-out),box-shadow var(--d2) var(--ease-out)}
-.btn-primary:active,.btn-ghost:active{transform:scale(.985)}
+.btn-ghost{height:38px;padding:0 15px;border:2px solid var(--text);border-radius:0;background:var(--surface);font-size:13.5px;font-weight:700;color:var(--text-secondary);box-shadow:3px 3px 0 var(--brutal-blue);transition:transform var(--d2) var(--ease-out),box-shadow var(--d2) var(--ease-out),border-color var(--d2) var(--ease-out),color var(--d2) var(--ease-out);display:inline-flex;align-items:center;gap:8px}
+.btn-primary{height:42px;padding:0 20px;border:2px solid var(--text);border-radius:0;background:var(--text);color:#fff;font-size:14px;font-weight:800;display:inline-flex;align-items:center;gap:9px;box-shadow:4px 4px 0 var(--brutal-blue);transition:transform var(--d2) var(--ease-out),box-shadow var(--d2) var(--ease-out)}
+.btn-primary:active,.btn-ghost:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--brutal-blue)}
 .right{margin-left:auto;display:flex;gap:10px}
 .copied{color:var(--success)}
 
@@ -101,8 +101,8 @@
   .chapter:hover::before,.chapter:hover::after{transform:scaleY(1.7)}
   .chapter:hover::after{transform:scaleX(var(--f,0)) scaleY(1.7)}
   .pbtn:hover{background:rgba(255,255,255,.14)}
-  .btn-ghost:hover{border-color:var(--border-strong);color:var(--text);box-shadow:var(--shadow-sm);transform:translateY(-1px)}
-  .btn-primary:hover{transform:translateY(-1px);box-shadow:var(--shadow-md)}
+  .btn-ghost:hover{border-color:var(--text);color:var(--text);box-shadow:5px 5px 0 var(--brutal-blue);transform:translate(-1px,-1px)}
+  .btn-primary:hover{transform:translate(-1px,-1px);box-shadow:6px 6px 0 var(--brutal-blue)}
   .scene:hover{transform:translateY(-4px);box-shadow:var(--shadow-lg)}
   .cov button:hover{background:var(--accent-soft);color:var(--text);padding-left:16px}
   .cov button:hover .ck path{stroke-dashoffset:16;animation:var(--kf-draw) .4s var(--ease-out) forwards}

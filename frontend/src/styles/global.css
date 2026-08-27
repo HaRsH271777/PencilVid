@@ -1,7 +1,9 @@
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
-  margin:0;background:var(--canvas);color:var(--text);
+  margin:0;background-color:var(--canvas);color:var(--text);
+  background-image:linear-gradient(rgba(21,21,21,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(21,21,21,.025) 1px,transparent 1px);
+  background-size:32px 32px;
   font-family:var(--sans);
   font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;
   font-feature-settings:'cv11','ss01';
@@ -20,8 +22,8 @@ input,select,textarea{font:inherit;color:inherit}
 .num,time,[class*="metric"],[class*="duration"],[class*="time"],[class*="counter"]{font-variant-numeric:tabular-nums}
 .hand{font-family:var(--hand);font-weight:600}
 .shell{width:var(--shell);margin:0 auto}
-.eyebrow{font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--text-tertiary)}
-:focus-visible{outline:2px solid var(--accent);outline-offset:3px;box-shadow:0 0 0 4px var(--accent-a16)!important}
+.eyebrow{display:inline-flex;width:max-content;padding:5px 9px;background:var(--text);color:#fff;font:700 10.5px var(--mono);letter-spacing:.11em;text-transform:uppercase;transform:rotate(-1deg)}
+:focus-visible{outline:2px solid var(--text);outline-offset:3px;box-shadow:3px 3px 0 var(--brutal-blue)!important}
 
 @keyframes screen-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @keyframes word-in{to{opacity:1;transform:none;filter:blur(0)}}
@@ -38,6 +40,8 @@ input,select,textarea{font:inherit;color:inherit}
 @keyframes blip{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.75)}}
 @keyframes pulse-ring{0%,100%{box-shadow:0 0 0 0 var(--accent-a16)}50%{box-shadow:0 0 0 5px transparent}}
 @keyframes sweep{to{transform:translateX(100%)}}
+@keyframes brutal-pulse{0%,100%{border-color:var(--text)}50%{border-color:var(--brutal-blue)}}
+@keyframes brutal-glitch{0%,100%{translate:0}25%{translate:-1px 1px}50%{translate:1px -1px}75%{translate:1px 1px}}
 
 /* CSS Modules scope bare animation identifiers. Indirection through global
    custom properties keeps every module bound to these shared keyframes. */
@@ -47,6 +51,7 @@ input,select,textarea{font:inherit;color:inherit}
   --kf-blink:blink;--kf-spin:spin;--kf-cue:cue;--kf-pl:pl;
   --kf-chip-in:chip-in;--kf-ping:ping;--kf-blip:blip;
   --kf-pulse-ring:pulse-ring;--kf-sweep:sweep;
+  --kf-brutal-pulse:brutal-pulse;--kf-brutal-glitch:brutal-glitch;
 }
 
 @media(prefers-reduced-motion:reduce){

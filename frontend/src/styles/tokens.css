@@ -3,6 +3,9 @@
   --text:#151515; --text-secondary:#6f6f6a; --text-tertiary:#70706a;
   --border:#e3e3de; --border-strong:#d2d2cc;
   --accent:#315fda; --accent-soft:#edf1fc;
+  --brutal-blue:#4a90e2;
+  --brutal-shadow-sm:3px 3px 0 var(--text),6px 6px 0 var(--brutal-blue);
+  --brutal-shadow:5px 5px 0 var(--text),10px 10px 0 var(--brutal-blue);
   --success:#3f765b; --danger:#b74432;
   --paper:#fffdf6;
 

@@ -66,7 +66,7 @@ function ExampleCard({ title, category, duration, kind, big = false, poster, to,
     const bounds = event.currentTarget.getBoundingClientRect()
     const x = (event.clientX - bounds.left) / bounds.width - .5
     const y = (event.clientY - bounds.top) / bounds.height - .5
-    event.currentTarget.style.transform = `translateY(-4px) rotateX(${-y * 3}deg) rotateY(${x * 3}deg)`
+    event.currentTarget.style.transform = `rotateX(${-y * 3}deg) rotateY(${x * 3}deg)`
   }
 
   const openWithTransition = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -88,6 +88,7 @@ function ExampleCard({ title, category, duration, kind, big = false, poster, to,
         <span className={styles.category}>{category}</span>
         <strong>{title}</strong>
       </span>
+      <span className={styles.cardButton}>Watch video</span>
     </Link>
   )
 }
