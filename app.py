@@ -68,6 +68,7 @@ from animated_scene import (
 )
 from visual_quality import CandidateRegistry, semantic_fallback_plan
 from run_log import log_local_transform
+from supabase_store import supabase_store
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -176,6 +177,7 @@ STREAM_PLAYER_ROUTE = "/stream" if ENABLE_STREAMING else None
 def _set_job(job_id: str, **changes: Any) -> None:
     with _jobs_lock:
         _jobs.setdefault(job_id, {}).update(changes)
+    supabase_store.update_job(job_id, changes)
 
 
 def _get_job(job_id: str) -> Dict[str, Any]:
@@ -219,6 +221,7 @@ def _set_job_plan(job_id: str, plan: Dict[str, Any]) -> None:
         coverage=list(plan.get("must_cover", [])),
         scenes=scenes,
     )
+    supabase_store.replace_scenes(_get_job(job_id).get("user_id"), job_id, scenes)
 
 
 def _update_job_scene(job_id: str, scene_index: int, **changes: Any) -> None:
@@ -232,6 +235,7 @@ def _update_job_scene(job_id: str, scene_index: int, **changes: Any) -> None:
                 scene.update(changes)
                 break
         job["scenes"] = scenes
+    supabase_store.update_scene(job_id, scene_index, changes)
 
 
 def _scene_image_path(job_id: str, scene_index: int) -> Optional[Path]:
@@ -965,6 +969,8 @@ def _run_video_job(job_id: str, payload: Dict[str, Any]) -> None:
         manifest["evaluation_url"] = f"/outputs/{job_id}/{evaluation_path.name}"
         manifest_path = output_dir / "manifest.json"
         write_manifest(manifest_path, manifest)
+        supabase_store.upload_scene_images(payload.get("user_id"), job_id, _get_job(job_id).get("scenes", []))
+        supabase_store.complete_video(payload.get("user_id"), job_id, manifest)
 
         _set_job(
             job_id,
@@ -1214,6 +1220,9 @@ def generated_scene_image(job_id: str, scene_index: int):
 
 @app.route("/api/videos", methods=["GET"])
 def list_videos():
+    user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    if auth_error:
+        return jsonify({"error": auth_error}), 401
     summaries: List[Dict[str, Any]] = []
     seen = set()
     if OUTPUT_DIR.is_dir():
@@ -1224,6 +1233,8 @@ def list_videos():
         )
         for manifest_path in manifests:
             job_id = manifest_path.parent.name
+            if not supabase_store.owns_job(user_id, job_id):
+                continue
             manifest = _load_video_manifest(job_id)
             if manifest is None or not (manifest_path.parent / "final.mp4").is_file():
                 continue
@@ -1243,6 +1254,8 @@ def list_videos():
         current_jobs = [(job_id, dict(job)) for job_id, job in _jobs.items()]
     for job_id, job in current_jobs:
         if job_id in seen or job.get("status") not in {"queued", "running"}:
+            continue
+        if not supabase_store.owns_job(user_id, job_id):
             continue
         summaries.insert(0, {
             "id": job_id,
@@ -1266,6 +1279,11 @@ def list_videos():
 
 @app.route("/api/videos/<job_id>", methods=["GET"])
 def video_detail(job_id: str):
+    user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    if auth_error:
+        return jsonify({"error": auth_error}), 401
+    if not supabase_store.owns_job(user_id, job_id):
+        return jsonify({"error": "video not found"}), 404
     manifest = _load_video_manifest(job_id)
     if manifest is None:
         return jsonify({"error": "video not found"}), 404
@@ -1274,6 +1292,13 @@ def video_detail(job_id: str):
 
 @app.route("/api/videos", methods=["POST"])
 def create_video():
+    user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    if auth_error:
+        return jsonify({"error": auth_error}), 401
+    quota = supabase_store.quota_status(user_id)
+    if quota and not quota.get("allowed"):
+        status = 503 if quota.get("error") else 429
+        return jsonify({"error": quota.get("error") or "Video limit reached", "quota": quota}), status
     # Accept both JSON bodies (existing clients) and multipart form uploads
     # (document attachments). Multipart fields arrive in request.form.
     is_multipart = request.content_type is not None and "multipart" in request.content_type
@@ -1290,6 +1315,7 @@ def create_video():
     # ---- optional document input ---------------------------------------------
     source_text = ""
     full_text = ""
+    source_document_id = None
     if doc_file is not None and getattr(doc_file, "filename", None):
         suffix = Path(str(doc_file.filename)).suffix.lower()
         if suffix in {".txt", ".md", ".markdown", ".pdf", ".docx", ".pptx"}:
@@ -1300,6 +1326,14 @@ def create_video():
             # the director so the planning call never breaches the TPM limit.
             full_text = _extract_document_text(doc_path)[:DOC_MAX_CHARS]
             source_text = full_text[:DOC_DIRECTOR_ANCHOR_CHARS]
+            source_document_id = supabase_store.create_source_document(
+                user_id,
+                str(doc_file.filename),
+                str(doc_path),
+                getattr(doc_file, "mimetype", None),
+                doc_path.stat().st_size,
+                len(full_text),
+            )
             print(f"Document uploaded: {doc_file.filename} ({len(full_text)} chars; "
                   f"{len(source_text)} char anchor to director)")
         else:
@@ -1326,6 +1360,7 @@ def create_video():
         created_at=_utc_now_iso(),
         scenes=[],
         target_duration_seconds=duration_seconds,
+        user_id=user_id,
     )
 
     style = str(data.get("style", "")).strip().lower()
@@ -1345,7 +1380,10 @@ def create_video():
         # cuts the per-scene element budget; the director always stays on
         # the strong 120b model.
         "quality_mode": str(data.get("quality_mode") or "balanced").strip().lower(),
+        "user_id": user_id,
+        "source_document_id": source_document_id,
     }
+    supabase_store.create_job(user_id, job_id, payload)
 
     if payload["mode"] == "streaming" and ENABLE_STREAMING:
         from segment_pipeline import run_streaming_pipeline
@@ -1471,6 +1509,8 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        supabase_store.upload_scene_images(payload.get("user_id"), job_id, _get_job(job_id).get("scenes", []))
+        supabase_store.complete_video(payload.get("user_id"), job_id, manifest)
 
         _set_job(
             job_id,
@@ -1546,6 +1586,11 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
 
 @app.route("/api/jobs/<job_id>")
 def job_status(job_id: str):
+    user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    if auth_error:
+        return jsonify({"error": auth_error}), 401
+    if not supabase_store.owns_job(user_id, job_id):
+        return jsonify({"error": "job not found"}), 404
     job = _get_job(job_id)
     if not job:
         # In-memory job state is intentionally lightweight and disappears when

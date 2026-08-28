@@ -1,11 +1,16 @@
-import { useLayoutEffect } from 'react'
+import { useLayoutEffect, type ReactNode } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { Header } from './components/Header'
 import { ProductionProvider } from './components/ProductionProvider'
 import { useProduction } from './hooks/useProduction'
+import { useAuthReady, useAuthUser } from './lib/auth'
+import { Auth } from './routes/Auth'
+import { Account } from './routes/Account'
+import { Checkout } from './routes/Checkout'
 import { Home } from './routes/Home'
 import { Landing } from './routes/Landing'
 import { Library } from './routes/Library'
+import { Plans } from './routes/Plans'
 import { Production } from './routes/Production'
 import { VideoDetail } from './routes/VideoDetail'
 import styles from './App.module.css'
@@ -28,6 +33,33 @@ function StudioLayout() {
   )
 }
 
+function RequireAuth({ children }: { children: ReactNode }) {
+  const ready = useAuthReady()
+  const user = useAuthUser()
+  const location = useLocation()
+
+  if (!ready) return <main className={styles.authLoading}>Restoring your studio…</main>
+  if (!user) {
+    const returnTo = `${location.pathname}${location.search}`
+    return <Navigate replace to={`/auth?returnTo=${encodeURIComponent(returnTo)}`} />
+  }
+  return children
+}
+
+function PlanThemeSync() {
+  const user = useAuthUser()
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.planTheme = user?.plan === 'Pro Ultra'
+      ? 'pro-ultra'
+      : user?.plan === 'Pro'
+        ? 'pro'
+        : 'free'
+  }, [user?.plan])
+
+  return null
+}
+
 function LegacyRedirect({ to }: { to: string }) {
   const location = useLocation()
   return <Navigate replace to={`${to}${location.search}`} />
@@ -48,8 +80,12 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
-      <Route path="/app" element={<StudioLayout />}>
+      <Route path="/auth" element={<Auth />} />
+      <Route path="/checkout" element={<Checkout />} />
+      <Route path="/app" element={<RequireAuth><StudioLayout /></RequireAuth>}>
         <Route index element={<Home />} />
+        <Route path="account" element={<Account />} />
+        <Route path="plans" element={<Plans />} />
         <Route path="create" element={<Production />} />
         <Route path="videos" element={<Library />} />
         <Route path="videos/:id" element={<VideoDetail />} />
@@ -63,7 +99,7 @@ function AppRoutes() {
 }
 
 function App() {
-  return <ProductionProvider><AppRoutes /></ProductionProvider>
+  return <><PlanThemeSync /><ProductionProvider><AppRoutes /></ProductionProvider></>
 }
 
 export default App

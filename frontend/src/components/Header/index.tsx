@@ -8,6 +8,7 @@ import {
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useMagnetic, useScrollProgress } from '../../hooks'
 import { Button } from '../Button/Button'
+import { AccountMenu } from '../AccountMenu'
 import styles from './Header.module.css'
 
 interface HeaderProps {
@@ -30,6 +31,7 @@ export function Header({ jobActive, jobScene, jobProgress }: HeaderProps) {
   const newVideoRef = useRef<HTMLAnchorElement>(null)
   const myVideosRef = useRef<HTMLAnchorElement>(null)
   const videosActive = location.pathname.startsWith('/app/videos')
+  const accountActive = location.pathname.startsWith('/app/account')
   const activeLinkRef = videosActive ? myVideosRef : newVideoRef
   const showJob = jobActive && location.pathname !== '/app/create'
   const clampedJobProgress = Math.min(100, Math.max(0, jobProgress))
@@ -89,9 +91,9 @@ export function Header({ jobActive, jobScene, jobProgress }: HeaderProps) {
         </span>
 
         <nav className={styles.nav} ref={navRef} aria-label="Primary navigation">
-          <span className={styles['nav-pill']} ref={pillRef} />
+          <span className={`${styles['nav-pill']} ${accountActive ? styles.hidden : ''}`} ref={pillRef} />
           <Link
-            className={!videosActive ? styles['is-active'] : undefined}
+            className={!videosActive && !accountActive ? styles['is-active'] : undefined}
             ref={newVideoRef}
             to="/app"
           >
@@ -104,7 +106,7 @@ export function Header({ jobActive, jobScene, jobProgress }: HeaderProps) {
           >
             My videos
           </Link>
-          <span className={styles.kbd} style={{ marginLeft: 10 }}>⌘K</span>
+          <AccountMenu signInClassName={styles['auth-link']} />
           <Button arrow className={styles['hdr-cta']} onClick={() => navigate('/app')}>Start explaining</Button>
         </nav>
       </div>

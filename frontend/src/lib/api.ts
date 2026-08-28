@@ -8,6 +8,7 @@ import type {
   VideoDetail,
   VideoSummary,
 } from './types'
+import { getAccessToken, isSupabaseConfigured } from './supabase'
 
 export const BACKEND_PATHS = {
   api: '/api',
@@ -58,6 +59,11 @@ export class ApiError extends Error {
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
+  const accessToken = await getAccessToken()
+  if (isSupabaseConfigured && !accessToken) {
+    throw new ApiError(401, { error: 'Please sign in before using the studio.' })
+  }
+  if (accessToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${accessToken}`)
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
