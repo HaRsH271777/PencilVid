@@ -17,9 +17,9 @@
   );
 
   insert into public.plan_catalog (id, display_name, monthly_price_cents, video_limit, theme_color, features) values
-    ('free', 'Free', 0, 5, '#4a90e2', '["Standard video quality","Personal video library","Shareable exports"]'),
-    ('pro', 'Pro', 1900, 10, '#f2c744', '["High-quality exports","Priority generation","Everything in Free"]'),
-    ('pro_ultra', 'Pro Ultra', 3900, 20, '#ef5b52', '["Premium video quality","Fastest render priority","Everything in Pro"]')
+    ('free', 'Free', 0, 5, '#60a5fa', '["Standard video quality","Personal video library","Shareable exports"]'),
+    ('pro', 'Pro', 1900, 10, '#1e40af', '["High-quality exports","Priority generation","Everything in Free"]'),
+    ('pro_ultra', 'Pro Ultra', 3900, 20, '#7c3aed', '["Premium video quality","Fastest render priority","Everything in Pro"]')
   on conflict (id) do update set display_name = excluded.display_name, monthly_price_cents = excluded.monthly_price_cents, video_limit = excluded.video_limit, theme_color = excluded.theme_color, features = excluded.features;
 
   create table public.profiles (

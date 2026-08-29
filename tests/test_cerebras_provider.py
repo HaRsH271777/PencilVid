@@ -5,6 +5,8 @@ from streaming_llm import _build_kwargs
 
 
 def test_cerebras_can_configure_both_llm_roles(monkeypatch):
+    monkeypatch.delenv("DIRECTOR_PROVIDER", raising=False)
+    monkeypatch.delenv("PLANNER_PROVIDER", raising=False)
     monkeypatch.setenv("LLM_PROVIDER", "cerebras")
     monkeypatch.setenv("CEREBRAS_API_KEY", "test-key")
     monkeypatch.setenv("CEREBRAS_BASE_URL", "https://example.test/v1/")
@@ -22,6 +24,7 @@ def test_cerebras_can_configure_both_llm_roles(monkeypatch):
 
 
 def test_cerebras_can_be_selected_for_only_the_planner(monkeypatch):
+    monkeypatch.delenv("DIRECTOR_PROVIDER", raising=False)
     monkeypatch.setenv("LLM_PROVIDER", "groq")
     monkeypatch.setenv("PLANNER_PROVIDER", "cerebras")
     monkeypatch.setenv("CEREBRAS_PLANNER_MODEL", "gpt-oss-120b")

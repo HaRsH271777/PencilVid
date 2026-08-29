@@ -969,7 +969,6 @@ def _run_video_job(job_id: str, payload: Dict[str, Any]) -> None:
         manifest["evaluation_url"] = f"/outputs/{job_id}/{evaluation_path.name}"
         manifest_path = output_dir / "manifest.json"
         write_manifest(manifest_path, manifest)
-        supabase_store.upload_scene_images(payload.get("user_id"), job_id, _get_job(job_id).get("scenes", []))
         supabase_store.complete_video(payload.get("user_id"), job_id, manifest)
 
         _set_job(
@@ -1220,9 +1219,15 @@ def generated_scene_image(job_id: str, scene_index: int):
 
 @app.route("/api/videos", methods=["GET"])
 def list_videos():
-    user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    owned_job_ids, auth_error, auth_status = supabase_store.authorized_job_ids(
+        request.headers.get("Authorization", "")
+    )
     if auth_error:
-        return jsonify({"error": auth_error}), 401
+        return jsonify({"error": auth_error}), auth_status
+
+    def is_owned(job_id: str) -> bool:
+        return owned_job_ids is None or job_id in owned_job_ids
+
     summaries: List[Dict[str, Any]] = []
     seen = set()
     if OUTPUT_DIR.is_dir():
@@ -1233,7 +1238,7 @@ def list_videos():
         )
         for manifest_path in manifests:
             job_id = manifest_path.parent.name
-            if not supabase_store.owns_job(user_id, job_id):
+            if not is_owned(job_id):
                 continue
             manifest = _load_video_manifest(job_id)
             if manifest is None or not (manifest_path.parent / "final.mp4").is_file():
@@ -1255,7 +1260,7 @@ def list_videos():
     for job_id, job in current_jobs:
         if job_id in seen or job.get("status") not in {"queued", "running"}:
             continue
-        if not supabase_store.owns_job(user_id, job_id):
+        if not is_owned(job_id):
             continue
         summaries.insert(0, {
             "id": job_id,
@@ -1348,21 +1353,6 @@ def create_video():
         return jsonify({"error": "duration_seconds must be between 20 and 1800 for this MVP"}), 400
 
     job_id = uuid.uuid4().hex[:12]
-    _set_job(
-        job_id,
-        status="queued",
-        stage="queued",
-        progress=0,
-        detail="Queued",
-        prompt=prompt,
-        audience=str(data.get("audience", "general learner")).strip().lower(),
-        style=str(data.get("style", "")).strip().lower(),
-        created_at=_utc_now_iso(),
-        scenes=[],
-        target_duration_seconds=duration_seconds,
-        user_id=user_id,
-    )
-
     style = str(data.get("style", "")).strip().lower()
 
     payload = {
@@ -1383,7 +1373,28 @@ def create_video():
         "user_id": user_id,
         "source_document_id": source_document_id,
     }
-    supabase_store.create_job(user_id, job_id, payload)
+    reservation = supabase_store.create_job(user_id, job_id, payload)
+    if not reservation.get("allowed", False):
+        status = 503 if reservation.get("error") else 429
+        return jsonify({
+            "error": reservation.get("error") or "Video limit reached",
+            "quota": reservation,
+        }), status
+
+    _set_job(
+        job_id,
+        status="queued",
+        stage="queued",
+        progress=0,
+        detail="Queued",
+        prompt=prompt,
+        audience=str(data.get("audience", "general learner")).strip().lower(),
+        style=style,
+        created_at=_utc_now_iso(),
+        scenes=[],
+        target_duration_seconds=duration_seconds,
+        user_id=user_id,
+    )
 
     if payload["mode"] == "streaming" and ENABLE_STREAMING:
         from segment_pipeline import run_streaming_pipeline
@@ -1509,7 +1520,6 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        supabase_store.upload_scene_images(payload.get("user_id"), job_id, _get_job(job_id).get("scenes", []))
         supabase_store.complete_video(payload.get("user_id"), job_id, manifest)
 
         _set_job(

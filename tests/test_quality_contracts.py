@@ -140,6 +140,9 @@ def test_local_factuality_fallback_scrubs_spoken_and_visible_magnitudes():
     assert result["applied"] is True
     assert result.get("extra_llm_calls", 0) == 0
     assert result["remaining"] == []
+    combined = plan["scenes"][0]["narration"] + plan["scenes"][0]["visual_prompt"]
+    assert "thousand" not in combined
+    assert "10,000" not in combined
 
 
 def test_magnitude_fallback_consumes_of_without_breaking_grammar():
@@ -152,9 +155,6 @@ def test_magnitude_fallback_consumes_of_without_breaking_grammar():
     assert _replace_rejected_quantity(
         "Billions of particles gather.", "Billions"
     ) == "A representative number of particles gather."
-    combined = plan["scenes"][0]["narration"] + plan["scenes"][0]["visual_prompt"]
-    assert "thousand" not in combined
-    assert "10,000" not in combined
 
 
 def test_quantity_parser_does_not_consume_first_letter_of_next_word_as_unit():

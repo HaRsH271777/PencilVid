@@ -108,29 +108,30 @@ class SupabaseStore:
             LOGGER.warning("Supabase rejected the presented session: %s", type(exc).__name__)
             return None, "Invalid or expired session"
 
-    def create_job(self, user_id: Optional[str], job_id: str, payload: Dict[str, Any]) -> None:
-        if not user_id:
-            return
-        row = {
-            "id": job_id,
-            "user_id": user_id,
-            "prompt": str(payload.get("prompt", "")),
-            "audience": str(payload.get("audience", "beginner")),
-            "style": str(payload.get("style", "default")),
-            "requested_duration_seconds": round(float(payload.get("duration_seconds", 0))),
-            "mode": str(payload.get("mode", "batch")),
-            "quality_mode": str(payload.get("quality_mode", "balanced")),
-            "status": "queued",
-            "stage": "queued",
-            "progress": 0,
-            "detail": "Queued",
-            "request_payload": {key: value for key, value in payload.items() if key not in {"source_text", "full_source_text"}},
-            "source_document_id": payload.get("source_document_id"),
+    def create_job(self, user_id: Optional[str], job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.enabled or not user_id:
+            return {"allowed": True, "local_mode": True}
+        params = {
+            "p_user_id": user_id,
+            "p_job_id": job_id,
+            "p_source_document_id": payload.get("source_document_id"),
+            "p_prompt": str(payload.get("prompt", "")),
+            "p_audience": str(payload.get("audience", "beginner")),
+            "p_style": str(payload.get("style", "default")),
+            "p_requested_duration_seconds": round(float(payload.get("duration_seconds", 0))),
+            "p_mode": str(payload.get("mode", "batch")),
+            "p_quality_mode": str(payload.get("quality_mode", "balanced")),
+            "p_request_payload": {key: value for key, value in payload.items() if key not in {"source_text", "full_source_text"}},
         }
-        self._safe("create job", lambda: self.client.table("video_jobs").insert(row).execute())  # type: ignore[union-attr]
-        self._safe("record usage start", lambda: self.client.table("usage_events").insert({  # type: ignore[union-attr]
-            "user_id": user_id, "job_id": job_id, "event_type": "video_started", "period_start": _now()
-        }).execute())
+        try:
+            response = self.client.rpc("create_video_job_with_quota", params).execute()  # type: ignore[union-attr]
+            result = response.data
+            if isinstance(result, list):
+                result = result[0] if result else None
+            return result if isinstance(result, dict) else {"allowed": False, "error": "Invalid quota response"}
+        except Exception as exc:
+            LOGGER.error("Atomic job creation failed: %s", type(exc).__name__)
+            return {"allowed": False, "error": "Video quota service is temporarily unavailable"}
 
     def create_source_document(self, user_id: Optional[str], filename: str, path: str, mime_type: Optional[str], size_bytes: int, text_length: int) -> Optional[str]:
         if not user_id:
@@ -188,6 +189,28 @@ class SupabaseStore:
         plan = manifest.get("plan") if isinstance(manifest.get("plan"), dict) else {}
         request_data = manifest.get("request") if isinstance(manifest.get("request"), dict) else {}
         scenes = plan.get("scenes") if isinstance(plan.get("scenes"), list) else manifest.get("segments", [])
+        normalized_scenes = []
+        for fallback_index, scene in enumerate(scenes):
+            if not isinstance(scene, dict):
+                continue
+            if "index" in scene:
+                try:
+                    scene_index = max(0, int(scene["index"]))
+                except (TypeError, ValueError):
+                    scene_index = fallback_index
+            else:
+                try:
+                    scene_index = max(0, int(scene.get("id", scene.get("scene_id", fallback_index + 1))) - 1)
+                except (TypeError, ValueError):
+                    scene_index = fallback_index
+            normalized_scenes.append({
+                "index": scene_index,
+                "title": str(scene.get("teaching_beat") or scene.get("title") or scene.get("visual_prompt") or f"Scene {scene_index + 1}"),
+                "narration": str(scene.get("narration", "")),
+                "status": "done",
+                "image_url": scene.get("image_url"),
+            })
+        self.replace_scenes(user_id, job_id, normalized_scenes)
         output_dir = Path(os.environ.get("OUTPUT_DIR", Path(__file__).resolve().parent / "outputs")) / job_id
         video_path = self._upload_file("video-assets", f"{user_id}/videos/{job_id}/final.mp4", output_dir / "final.mp4", "video/mp4")
         manifest_path = self._upload_file("video-assets", f"{user_id}/videos/{job_id}/manifest.json", output_dir / "manifest.json", "application/json")
@@ -209,6 +232,7 @@ class SupabaseStore:
             "coverage": plan.get("must_cover", []),
         }
         self._safe("complete video", lambda: self.client.table("videos").upsert(row).execute())  # type: ignore[union-attr]
+        self.upload_scene_images(user_id, job_id, normalized_scenes)
         assets = [
             {"user_id": user_id, "job_id": job_id, "video_id": job_id, "asset_type": "video", "storage_bucket": "video-assets" if video_path else "local", "storage_path": video_path or f"outputs/{job_id}/final.mp4", "mime_type": "video/mp4"},
             {"user_id": user_id, "job_id": job_id, "video_id": job_id, "asset_type": "manifest", "storage_bucket": "video-assets" if manifest_path else "local", "storage_path": manifest_path or f"outputs/{job_id}/manifest.json", "mime_type": "application/json"},
@@ -260,6 +284,55 @@ class SupabaseStore:
             return False
         response = self._safe("check job owner", lambda: self.client.table("video_jobs").select("id").eq("id", job_id).eq("user_id", user_id).maybe_single().execute())  # type: ignore[union-attr]
         return bool(response and response.data)
+
+    def owned_job_ids(self, user_id: Optional[str]) -> Optional[set[str]]:
+        """Fetch ownership once for list views instead of issuing one query per file."""
+        if not self.enabled:
+            return None
+        if not user_id:
+            return set()
+        try:
+            response = httpx.get(
+                f"{self.url}/rest/v1/video_jobs",
+                headers={
+                    "apikey": self.secret_key,
+                    "Authorization": f"Bearer {self.secret_key}",
+                },
+                params={"select": "id", "user_id": f"eq.{user_id}"},
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            rows = response.json()
+        except Exception as exc:
+            LOGGER.error("Supabase list owned jobs failed: %s", type(exc).__name__)
+            return set()
+        return {str(row["id"]) for row in rows if row.get("id")}
+
+    def authorized_job_ids(self, authorization: str) -> Tuple[Optional[set[str]], Optional[str], int]:
+        """Authenticate and list the caller's jobs in one RLS-protected request."""
+        if not self.enabled:
+            return None, None, 200
+        if not authorization.startswith("Bearer ") or not authorization[7:].strip():
+            return set(), "Authentication required", 401
+        token = authorization[7:].strip()
+        try:
+            response = httpx.get(
+                f"{self.url}/rest/v1/video_jobs",
+                headers={"apikey": self.secret_key, "Authorization": f"Bearer {token}"},
+                params={"select": "id"},
+                timeout=10.0,
+            )
+            if response.status_code in {401, 403}:
+                return set(), "Invalid or expired session", 401
+            response.raise_for_status()
+            rows = response.json()
+            return {str(row["id"]) for row in rows if row.get("id")}, None, 200
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+            LOGGER.error("Supabase authenticated job list is unreachable: %s", type(exc).__name__)
+            return set(), "Authentication service temporarily unavailable", 503
+        except Exception as exc:
+            LOGGER.warning("Supabase rejected authenticated job list: %s", type(exc).__name__)
+            return set(), "Invalid or expired session", 401
 
 
 supabase_store = SupabaseStore()

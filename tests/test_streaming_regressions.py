@@ -54,7 +54,8 @@ def test_live_player_uses_complete_mp4_fallback():
     assert "function canUseMSE()" in template
     assert "return false;" in template
     assert "handleJobCompleted" in template
-    assert "video.src = `${final.href}?v=${Date.now()}`" in template
+    assert "const finalUrl = new URL(final.href, window.location.href)" in template
+    assert "video.src = `${finalUrl.pathname}?v=${Date.now()}`" in template
 
 
 def test_visual_requests_have_a_startup_safe_timeout():

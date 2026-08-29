@@ -204,7 +204,9 @@ def test_connector_aimed_at_node_center_is_snapped_before_its_label():
     ]}
     fixed = freeform_repair.repair_post_continuity_plan(plan)
     route = next(item for item in fixed["elements"] if item["id"] == "route")
-    assert route["x2"] <= 381
+    condition = next(item for item in fixed["elements"] if item["id"] == "condition")
+    condition_left = min(float(value) for value in condition["points"].replace(",", " ").split()[0::2])
+    assert route["x2"] <= condition_left + 1
     assert fixed["_freeform_repair"]["unresolved_cross_type_collision_count"] == 0
 
 

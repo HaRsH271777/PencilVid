@@ -6,12 +6,21 @@ are present.
 
 ## 1. Create and migrate a project
 
-Create a Supabase project, then run
-`migrations/20260828000000_initial_schema.sql` in the Supabase SQL Editor. The
-migration creates Auth-linked profiles, preferences, plans, subscriptions,
-payment history, quotas, source documents, generation jobs/events, videos,
-scenes, asset metadata, usage history, private Storage buckets, indexes,
-triggers, and row-level security policies.
+Create a Supabase project, then run every file in `migrations/` in filename
+order using the Supabase SQL Editor:
+
+1. `20260828000000_initial_schema.sql`
+2. `20260829000000_atomic_quotas_and_blue_plans.sql`
+
+The migrations create Auth-linked profiles, preferences, plans, subscriptions,
+payment history, atomic quotas, source documents, generation jobs/events,
+videos, scenes, asset metadata, usage history, private Storage buckets,
+indexes, triggers, and row-level security policies.
+
+The second migration is required even if the first migration was previously
+installed. It atomically reserves one allowance slot together with each job,
+prevents concurrent requests from crossing the plan limit, avoids double
+counting completed videos, and refunds failed or cancelled renders.
 
 Supabase Auth owns email/password identities. Passwords are hashed and managed
 inside `auth.users`; Simi never stores plaintext passwords or copies password

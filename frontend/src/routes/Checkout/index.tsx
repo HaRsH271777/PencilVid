@@ -7,8 +7,8 @@ type PaidPlan = Exclude<AuthUser['plan'], 'Free'>
 type CheckoutStatus = 'ready' | 'processing' | 'confirmed'
 
 const checkoutPlans: Record<PaidPlan, { price: string; color: string; videos: number }> = {
-  Pro: { price: '19.00', color: 'yellow', videos: 10 },
-  'Pro Ultra': { price: '39.00', color: 'red', videos: 20 },
+  Pro: { price: '19.00', color: 'royal', videos: 10 },
+  'Pro Ultra': { price: '39.00', color: 'purple', videos: 20 },
 }
 
 const planRank: Record<AuthUser['plan'], number> = { Free: 0, Pro: 1, 'Pro Ultra': 2 }
