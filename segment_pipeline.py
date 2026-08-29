@@ -141,7 +141,13 @@ def _emit(socketio, event: str, payload: Dict[str, Any]) -> None:
     EVENTS.append(event)
     if socketio is not None:
         try:
-            socketio.emit(event, payload)
+            job_id = str(payload.get("job_id") or "")
+            if job_id:
+                socketio.emit(event, payload, to=f"job:{job_id}")
+            else:
+                # Events without a job boundary are diagnostic only and must
+                # never be broadcast to every connected user.
+                print(f"[event:{event}]", json.dumps(payload, default=str))
         except Exception as exc:
             print(f"SocketIO emit failed for {event}: {exc}")
     else:

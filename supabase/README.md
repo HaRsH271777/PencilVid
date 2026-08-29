@@ -11,13 +11,14 @@ order using the Supabase SQL Editor:
 
 1. `20260828000000_initial_schema.sql`
 2. `20260829000000_atomic_quotas_and_blue_plans.sql`
+3. `20260830000000_stage1_security_architecture.sql`
 
 The migrations create Auth-linked profiles, preferences, plans, subscriptions,
 payment history, atomic quotas, source documents, generation jobs/events,
 videos, scenes, asset metadata, usage history, private Storage buckets,
 indexes, triggers, and row-level security policies.
 
-The second migration is required even if the first migration was previously
+The second and third migrations are required even if the first migration was previously
 installed. It atomically reserves one allowance slot together with each job,
 prevents concurrent requests from crossing the plan limit, avoids double
 counting completed videos, and refunds failed or cancelled renders.
@@ -59,10 +60,17 @@ sessions and confirmation-required signups.
 
 ## 5. Billing transition
 
-`complete_demo_checkout` is deliberately marked demo-only. It records a test
-payment, subscription history, the selected plan, quota reset, and theme. Before
-accepting real money, revoke this RPC from `authenticated` and let a verified
-payment-provider webhook perform the same updates using the backend secret key.
+The Stage 1 migration removes `complete_demo_checkout`; browsers cannot assign
+paid plans. The checkout endpoint fails safely until a real provider adapter
+and signed, idempotent webhook are implemented. Never update `current_plan_id`
+from frontend code or from an unverified checkout-success redirect.
+
+## 6. Durable render workers
+
+Deploy the Flask service with `JOB_EXECUTION_MODE=queue`, then run `worker.py`
+as a separate process using the same backend secrets and rendering tools.
+Workers atomically claim queued jobs, heartbeat while rendering, and allow
+stale interrupted work to be recovered without duplicate processing.
 
 ## Data ownership
 

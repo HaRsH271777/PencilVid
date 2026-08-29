@@ -69,9 +69,11 @@ files in order:
 
 1. `supabase/migrations/20260828000000_initial_schema.sql`
 2. `supabase/migrations/20260829000000_atomic_quotas_and_blue_plans.sql`
+3. `supabase/migrations/20260830000000_stage1_security_architecture.sql`
 
-If the initial schema has already been installed, run only the second file.
-The second migration is required for atomic Free/Pro/Pro Ultra video limits.
+If the first two migrations are already installed, run only the third file.
+The third migration removes browser-controlled plan upgrades and adds the
+durable queue, plan duration/concurrency controls, and rate-limit buckets.
 
 In **Authentication → URL Configuration**:
 
@@ -109,6 +111,8 @@ FFMPEG_BIN=ffmpeg
 FFPROBE_BIN=ffprobe
 TTS_BACKEND=auto
 PORT=5000
+APP_ENV=development
+JOB_EXECUTION_MODE=inline
 ```
 
 For Piper narration, also configure:
@@ -190,6 +194,18 @@ Do not use the Flask port as the normal browser entry point during frontend
 development. Vite proxies `/api`, media, output, streaming, and Socket.IO
 requests to Flask on port 5000.
 
+### Queue mode (staging and production)
+
+Set `JOB_EXECUTION_MODE=queue` and run a separate worker process:
+
+```powershell
+.\.venv\Scripts\python.exe worker.py
+```
+
+Production also requires `APP_ENV=production`, exact `ALLOWED_ORIGINS`, and a
+random `MEDIA_SIGNING_KEY` of at least 32 characters. Never run production in
+inline mode: an application restart would terminate active renders.
+
 ## 8. First-use check
 
 1. Open `http://127.0.0.1:5173`.
@@ -198,8 +214,8 @@ requests to Flask on port 5000.
 4. Open the studio and generate a short test video.
 5. Watch progress move through planning, narration, visuals, encoding, and
    finalization.
-6. The completed MP4 is written to `outputs/<job_id>/final.mp4` and uploaded to
-   the private Supabase `video-assets` bucket when storage is configured.
+6. The completed MP4 is uploaded to the private Supabase `video-assets` bucket.
+   Local output is temporary working data; Supabase Storage is authoritative.
 
 An unauthenticated request to `http://127.0.0.1:5000/api/videos` should return
 `401 Authentication required`; that is expected and confirms API protection.

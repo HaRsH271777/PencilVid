@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import { updateUserPlan, useAuthUser, type AuthUser } from '../../lib/auth'
+import { useState } from 'react'
+import { Link, Navigate, useSearchParams } from 'react-router-dom'
+import { useAuthUser, type AuthUser } from '../../lib/auth'
+import { startBillingCheckout } from '../../lib/api'
 import styles from './Checkout.module.css'
 
 type PaidPlan = Exclude<AuthUser['plan'], 'Free'>
-type CheckoutStatus = 'ready' | 'processing' | 'confirmed'
+type CheckoutStatus = 'ready' | 'processing'
 
 const checkoutPlans: Record<PaidPlan, { price: string; color: string; videos: number }> = {
   Pro: { price: '19.00', color: 'royal', videos: 10 },
@@ -15,28 +16,26 @@ const planRank: Record<AuthUser['plan'], number> = { Free: 0, Pro: 1, 'Pro Ultra
 
 export function Checkout() {
   const user = useAuthUser()
-  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const requested = searchParams.get('plan')
   const plan: PaidPlan | null = requested === 'Pro' || requested === 'Pro Ultra' ? requested : null
   const [status, setStatus] = useState<CheckoutStatus>('ready')
-  const timers = useRef<number[]>([])
-
-  useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), [])
+  const [error, setError] = useState('')
 
   if (!user) return <Navigate replace to="/auth" />
   if (!plan || (status === 'ready' && planRank[plan] <= planRank[user.plan])) return <Navigate replace to="/app/plans" />
 
   const details = checkoutPlans[plan]
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  const submit = async () => {
     setStatus('processing')
-    timers.current.push(window.setTimeout(() => {
-      void updateUserPlan(user, plan, Math.round(Number(details.price) * 100)).then(() => {
-        setStatus('confirmed')
-        timers.current.push(window.setTimeout(() => navigate('/app/plans', { replace: true, state: { upgradedTo: plan } }), 900))
-      }).catch(() => setStatus('ready'))
-    }, 850))
+    setError('')
+    try {
+      const checkout = await startBillingCheckout(plan)
+      window.location.assign(checkout.checkout_url)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Secure billing is unavailable.')
+      setStatus('ready')
+    }
   }
 
   return (
@@ -44,14 +43,14 @@ export function Checkout() {
       <div aria-hidden="true" className={styles.grid} />
       <header className={styles.header}>
         <Link className={styles.brand} to="/app/plans"><span>S</span><strong>SIMI PAY</strong></Link>
-        <span>DEMO CHECKOUT · NO REAL CHARGE</span>
+        <span>SECURE CHECKOUT</span>
       </header>
 
       <div className={`shell ${styles.layout}`}>
         <section className={styles.summary}>
           <span className={styles.kicker}>Plan upgrade</span>
           <h1>Upgrade to<br /><em>{plan}.</em></h1>
-          <p>Your new color and allowance activate only after this demo payment is confirmed.</p>
+          <p>Your plan changes only after the payment provider confirms the transaction.</p>
           <div className={styles.order}>
             <div><span>PLAN</span><strong>{plan}</strong></div>
             <div><span>ALLOWANCE</span><strong>{details.videos} videos</strong></div>
@@ -62,18 +61,12 @@ export function Checkout() {
         </section>
 
         <section className={styles.paymentCard} aria-labelledby="payment-title">
-          <div className={styles.cardHead}><span>SECURE DEMO PAYMENT</span><h2 id="payment-title">Payment details</h2><p>Use the prefilled test card. Do not enter real financial information.</p></div>
-          <form className={styles.form} onSubmit={submit}>
-            <label><span>Name on card</span><input defaultValue="SIMI TEST USER" required /></label>
-            <label><span>Card number</span><input aria-label="Card number" defaultValue="4242 4242 4242 4242" inputMode="numeric" required /></label>
-            <div className={styles.split}>
-              <label><span>Expiry</span><input aria-label="Expiry date" defaultValue="12/30" inputMode="numeric" required /></label>
-              <label><span>CVC</span><input aria-label="CVC" defaultValue="123" inputMode="numeric" required /></label>
-            </div>
-            <div className={styles.demoNotice}><b>TEST MODE</b><span>No money moves and no card data is saved.</span></div>
-            <button className={styles.payButton} disabled={status !== 'ready'} type="submit"><span>{status === 'ready' ? `Pay $${details.price}` : status === 'processing' ? 'Confirming payment…' : 'Payment confirmed'}</span><b aria-hidden="true">{status === 'confirmed' ? '✓' : '→'}</b></button>
-          </form>
-          <div aria-live="polite" className={`${styles.confirmation} ${status === 'confirmed' ? styles.visible : ''}`} role="status"><span>✓</span><div><strong>Payment confirmed</strong><p>Activating {plan} and returning you to Simi Studio…</p></div></div>
+          <div className={styles.cardHead}><span>PAYMENT PROVIDER</span><h2 id="payment-title">Continue securely</h2><p>Card information will be collected only by the configured payment provider. Simi Studio never receives raw card details.</p></div>
+          <div className={styles.form}>
+            <div className={styles.demoNotice}><b>PROTECTED</b><span>Your plan changes only after a signed payment confirmation.</span></div>
+            {error && <div aria-live="polite" className={styles.demoNotice} role="alert"><b>NOT READY</b><span>{error}</span></div>}
+            <button className={styles.payButton} disabled={status !== 'ready'} onClick={() => void submit()} type="button"><span>{status === 'ready' ? `Continue · $${details.price}` : 'Opening secure checkout…'}</span><b aria-hidden="true">→</b></button>
+          </div>
         </section>
       </div>
     </main>

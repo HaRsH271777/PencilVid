@@ -140,18 +140,6 @@ export async function signUp(name: string, email: string, password: string): Pro
   return { user: data.session ? await syncSession(data.session) : null, needsEmailConfirmation: !data.session }
 }
 
-export async function updateUserPlan(user: AuthUser, plan: PlanName, amountCents = 0) {
-  if (!supabase) {
-    publishUser({ ...user, plan })
-    return
-  }
-  const planId = plan === 'Pro Ultra' ? 'pro_ultra' : plan.toLowerCase()
-  const { error } = await supabase.rpc('complete_demo_checkout', { target_plan: planId, amount_cents: amountCents })
-  if (error) throw error
-  const { data: { session } } = await supabase.auth.getSession()
-  await syncSession(session)
-}
-
 export async function clearAuthUser() {
   if (supabase) {
     const { error } = await supabase.auth.signOut()

@@ -24,7 +24,6 @@ load_dotenv(ROOT / "frontend" / ".env.local")
 
 URL = os.environ["SUPABASE_URL"]
 SECRET = os.environ["SUPABASE_SECRET_KEY"]
-PUBLISHABLE = os.environ["VITE_SUPABASE_PUBLISHABLE_KEY"]
 EXPECTED = {
     "free": {"limit": 5, "color": "#60a5fa"},
     "pro": {"limit": 10, "color": "#1e40af"},
@@ -80,18 +79,24 @@ def run_plan(plan: str, expected_limit: int) -> dict:
         profile = wait_for_profile(admin, user_id)
         assert profile["current_plan_id"] == "free"
 
-        checkout_verified = plan == "free"
+        plan_assignment_verified = plan == "free"
         if plan != "free":
-            user_client = create_client(URL, PUBLISHABLE)
-            user_client.auth.sign_in_with_password({"email": email, "password": password})
-            checkout = user_client.rpc(
-                "complete_demo_checkout",
-                {"target_plan": plan, "amount_cents": 1900 if plan == "pro" else 3900},
-            ).execute().data
-            checkout_verified = bool(checkout)
+            # Billing is intentionally not simulated through a browser-callable
+            # RPC. Service-role setup assigns the fixture plan only for quota
+            # testing; real upgrades must come from a verified provider webhook.
+            admin.table("subscriptions").update({"status": "expired"}).eq(
+                "user_id", user_id
+            ).in_("status", ["trialing", "active", "past_due"]).execute()
+            admin.table("subscriptions").insert({
+                "user_id": user_id, "plan_id": plan, "status": "active",
+                "provider": "test_fixture",
+            }).execute()
+            admin.table("profiles").update({
+                "current_plan_id": plan, "videos_used": 0,
+            }).eq("id", user_id).execute()
             upgraded_profile = wait_for_profile(admin, user_id)
-            checkout_verified = checkout_verified and upgraded_profile["current_plan_id"] == plan
-            assert checkout_verified
+            plan_assignment_verified = upgraded_profile["current_plan_id"] == plan
+            assert plan_assignment_verified
 
         with ThreadPoolExecutor(max_workers=min(expected_limit + 3, 12)) as pool:
             results = list(pool.map(lambda i: reserve(user_id, plan, i), range(expected_limit + 3)))
@@ -122,7 +127,7 @@ def run_plan(plan: str, expected_limit: int) -> dict:
             "allowed": len(allowed),
             "denied": len(denied),
             "refund_and_replacement": True,
-            "checkout": checkout_verified,
+            "fixture_plan_assignment": plan_assignment_verified,
             "payment_rows": len(payments),
             "subscription_rows": len(subscriptions),
         }

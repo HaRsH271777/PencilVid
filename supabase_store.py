@@ -140,13 +140,25 @@ class SupabaseStore:
         local_path = Path(path)
         remote_path = f"{user_id}/sources/{document_id}/{filename}"
         stored_path = self._upload_file("source-documents", remote_path, local_path, mime_type or "application/octet-stream")
+        if self.enabled and not stored_path:
+            LOGGER.error("Source document upload failed; refusing local-only persistence")
+            return None
         row = {
             "id": document_id, "user_id": user_id, "original_filename": filename,
-            "storage_path": stored_path or path, "mime_type": mime_type, "size_bytes": size_bytes,
-            "extracted_text_length": text_length, "metadata": {"storage": "supabase" if stored_path else "local_pending_upload"},
+            "storage_path": stored_path, "mime_type": mime_type, "size_bytes": size_bytes,
+            "extracted_text_length": text_length, "metadata": {"storage": "supabase"},
         }
-        response = self._safe("create source document", lambda: self.client.table("source_documents").insert(row).execute())  # type: ignore[union-attr]
-        return document_id if response else None
+        try:
+            self.client.table("source_documents").insert(row).execute()  # type: ignore[union-attr]
+            return document_id
+        except Exception as exc:
+            LOGGER.error("Supabase create source document failed: %s", type(exc).__name__)
+            if stored_path:
+                self._safe(
+                    "remove orphan source document",
+                    lambda: self.client.storage.from_("source-documents").remove([stored_path]),  # type: ignore[union-attr]
+                )
+            return None
 
     def update_job(self, job_id: str, changes: Dict[str, Any]) -> None:
         if not self.enabled:
@@ -183,9 +195,9 @@ class SupabaseStore:
         if row:
             self._safe("update scene", lambda: self.client.table("video_scenes").update(row).eq("job_id", job_id).eq("scene_index", scene_index).execute())  # type: ignore[union-attr]
 
-    def complete_video(self, user_id: Optional[str], job_id: str, manifest: Dict[str, Any]) -> None:
+    def complete_video(self, user_id: Optional[str], job_id: str, manifest: Dict[str, Any]) -> Dict[str, Any]:
         if not user_id:
-            return
+            return {"local_mode": True}
         plan = manifest.get("plan") if isinstance(manifest.get("plan"), dict) else {}
         request_data = manifest.get("request") if isinstance(manifest.get("request"), dict) else {}
         scenes = plan.get("scenes") if isinstance(plan.get("scenes"), list) else manifest.get("segments", [])
@@ -215,6 +227,10 @@ class SupabaseStore:
         video_path = self._upload_file("video-assets", f"{user_id}/videos/{job_id}/final.mp4", output_dir / "final.mp4", "video/mp4")
         manifest_path = self._upload_file("video-assets", f"{user_id}/videos/{job_id}/manifest.json", output_dir / "manifest.json", "application/json")
         evaluation_path = self._upload_file("video-assets", f"{user_id}/videos/{job_id}/evaluation.json", output_dir / "evaluation.json", "application/json")
+        if self.enabled and (not video_path or not manifest_path):
+            raise RuntimeError("Durable video upload failed; the render was not marked complete")
+        scene_paths = self.upload_scene_images(user_id, job_id, normalized_scenes)
+        poster_path = scene_paths.get(0)
         row = {
             "id": job_id,
             "user_id": user_id,
@@ -224,26 +240,35 @@ class SupabaseStore:
             "style": str(request_data.get("style") or "default"),
             "duration_seconds": float(manifest.get("final_duration_seconds") or request_data.get("target_duration_seconds") or 0),
             "scene_count": len(scenes),
-            "video_url": f"/outputs/{job_id}/final.mp4",
+            "video_url": None,
             "video_storage_path": video_path,
+            "poster_storage_path": poster_path,
             "manifest_storage_path": manifest_path,
             "evaluation_storage_path": evaluation_path,
             "manifest": manifest,
             "coverage": plan.get("must_cover", []),
         }
-        self._safe("complete video", lambda: self.client.table("videos").upsert(row).execute())  # type: ignore[union-attr]
-        self.upload_scene_images(user_id, job_id, normalized_scenes)
+        self.client.table("videos").upsert(row).execute()  # type: ignore[union-attr]
         assets = [
-            {"user_id": user_id, "job_id": job_id, "video_id": job_id, "asset_type": "video", "storage_bucket": "video-assets" if video_path else "local", "storage_path": video_path or f"outputs/{job_id}/final.mp4", "mime_type": "video/mp4"},
-            {"user_id": user_id, "job_id": job_id, "video_id": job_id, "asset_type": "manifest", "storage_bucket": "video-assets" if manifest_path else "local", "storage_path": manifest_path or f"outputs/{job_id}/manifest.json", "mime_type": "application/json"},
-            {"user_id": user_id, "job_id": job_id, "video_id": job_id, "asset_type": "evaluation", "storage_bucket": "video-assets" if evaluation_path else "local", "storage_path": evaluation_path or f"outputs/{job_id}/evaluation.json", "mime_type": "application/json"},
+            {"user_id": user_id, "job_id": job_id, "video_id": job_id, "asset_type": "video", "storage_bucket": "video-assets", "storage_path": video_path, "mime_type": "video/mp4"},
+            {"user_id": user_id, "job_id": job_id, "video_id": job_id, "asset_type": "manifest", "storage_bucket": "video-assets", "storage_path": manifest_path, "mime_type": "application/json"},
         ]
-        self._safe("record video assets", lambda: self.client.table("video_assets").upsert(assets, on_conflict="storage_bucket,storage_path").execute())  # type: ignore[union-attr]
-        self._safe("link scenes", lambda: self.client.table("video_scenes").update({"video_id": job_id}).eq("job_id", job_id).execute())  # type: ignore[union-attr]
+        if evaluation_path:
+            assets.append({"user_id": user_id, "job_id": job_id, "video_id": job_id, "asset_type": "evaluation", "storage_bucket": "video-assets", "storage_path": evaluation_path, "mime_type": "application/json"})
+        self._safe(
+            "record video assets",
+            lambda: self.client.table("video_assets").upsert(assets, on_conflict="storage_bucket,storage_path").execute(),  # type: ignore[union-attr]
+        )
+        self._safe(
+            "link scenes",
+            lambda: self.client.table("video_scenes").update({"video_id": job_id}).eq("job_id", job_id).execute(),  # type: ignore[union-attr]
+        )
+        return {"video_storage_path": video_path, "manifest_storage_path": manifest_path, "poster_storage_path": poster_path}
 
-    def upload_scene_images(self, user_id: Optional[str], job_id: str, scenes: List[Dict[str, Any]]) -> None:
+    def upload_scene_images(self, user_id: Optional[str], job_id: str, scenes: List[Dict[str, Any]]) -> Dict[int, str]:
         if not user_id:
-            return
+            return {}
+        uploaded: Dict[int, str] = {}
         work_dir = Path(os.environ.get("WORK_DIR", Path(__file__).resolve().parent / "work")) / job_id
         for index, scene in enumerate(scenes):
             scene_index = int(scene.get("index", index))
@@ -257,7 +282,135 @@ class SupabaseStore:
                 continue
             remote_path = self._upload_file("video-assets", f"{user_id}/videos/{job_id}/scenes/{scene_number:03d}.png", local_path, "image/png")
             if remote_path:
+                uploaded[scene_index] = remote_path
                 self._safe("store scene image", lambda: self.client.table("video_scenes").update({"image_storage_path": remote_path}).eq("job_id", job_id).eq("scene_index", scene_index).execute())  # type: ignore[union-attr]
+        return uploaded
+
+    def signed_storage_url(self, bucket: str, storage_path: Optional[str], expires_in: int = 900) -> Optional[str]:
+        """Return a short-lived URL for a private object without exposing the service key."""
+        if not self.client or not storage_path:
+            return None
+        try:
+            result = self.client.storage.from_(bucket).create_signed_url(storage_path, expires_in)
+            if isinstance(result, dict):
+                signed = result.get("signedURL") or result.get("signedUrl") or result.get("signed_url")
+                if isinstance(signed, str) and signed.startswith("/"):
+                    return f"{self.url.rstrip('/')}{signed}"
+                return signed if isinstance(signed, str) else None
+        except Exception as exc:
+            LOGGER.error("Supabase signed URL failed for %s: %s", storage_path, type(exc).__name__)
+        return None
+
+    def list_video_records(self, user_id: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+        if not self.enabled:
+            return None
+        if not user_id:
+            return []
+        response = self.client.table("videos").select(  # type: ignore[union-attr]
+            "id,title,audience,duration_seconds,poster_storage_path,created_at"
+        ).eq("user_id", user_id).order("created_at", desc=True).execute()
+        return list(response.data or [])
+
+    def video_record(self, user_id: Optional[str], job_id: str) -> Optional[Dict[str, Any]]:
+        if not self.enabled or not user_id:
+            return None
+        response = self.client.table("videos").select("*").eq("id", job_id).eq(  # type: ignore[union-attr]
+            "user_id", user_id
+        ).maybe_single().execute()
+        return response.data if response else None
+
+    def scene_records(self, user_id: Optional[str], job_id: str) -> List[Dict[str, Any]]:
+        if not self.enabled or not user_id:
+            return []
+        response = self.client.table("video_scenes").select("*").eq(  # type: ignore[union-attr]
+            "job_id", job_id
+        ).eq("user_id", user_id).order("scene_index").execute()
+        return list(response.data or [])
+
+    def job_record(self, user_id: Optional[str], job_id: str) -> Optional[Dict[str, Any]]:
+        if not self.enabled or not user_id:
+            return None
+        response = self.client.table("video_jobs").select("*").eq("id", job_id).eq(  # type: ignore[union-attr]
+            "user_id", user_id
+        ).maybe_single().execute()
+        return response.data if response else None
+
+    def active_job_records(self, user_id: Optional[str]) -> List[Dict[str, Any]]:
+        if not self.enabled or not user_id:
+            return []
+        response = self.client.table("video_jobs").select(  # type: ignore[union-attr]
+            "id,prompt,audience,style,requested_duration_seconds,status,stage,progress,detail,created_at"
+        ).eq("user_id", user_id).in_("status", ["queued", "running"]).order(
+            "created_at", desc=True
+        ).execute()
+        return list(response.data or [])
+
+    def claim_job(self, worker_id: str) -> Optional[Dict[str, Any]]:
+        if not self.enabled:
+            return None
+        response = self.client.rpc("claim_video_job", {"p_worker_id": worker_id}).execute()  # type: ignore[union-attr]
+        data = response.data
+        if isinstance(data, list):
+            data = data[0] if data else None
+        return data if isinstance(data, dict) else None
+
+    def heartbeat_job(self, job_id: str, worker_id: str) -> bool:
+        if not self.enabled:
+            return False
+        response = self.client.rpc("heartbeat_video_job", {  # type: ignore[union-attr]
+            "p_job_id": job_id, "p_worker_id": worker_id,
+        }).execute()
+        return bool(response.data)
+
+    def recover_stale_jobs(self, stale_after_seconds: int = 300) -> int:
+        if not self.enabled:
+            return 0
+        response = self.client.rpc("recover_stale_video_jobs", {  # type: ignore[union-attr]
+            "p_stale_after_seconds": max(60, stale_after_seconds),
+        }).execute()
+        return int(response.data or 0)
+
+    def source_document_blob(self, document_id: Optional[str]) -> Optional[Tuple[str, bytes]]:
+        if not self.enabled or not document_id:
+            return None
+        response = self.client.table("source_documents").select(  # type: ignore[union-attr]
+            "original_filename,storage_path"
+        ).eq("id", document_id).maybe_single().execute()
+        row = response.data if response else None
+        if not row or not row.get("storage_path"):
+            return None
+        body = self.client.storage.from_("source-documents").download(row["storage_path"])
+        return str(row.get("original_filename") or "source.txt"), bytes(body)
+
+    def delete_source_document(self, user_id: Optional[str], document_id: Optional[str]) -> None:
+        if not self.enabled or not user_id or not document_id:
+            return
+        response = self.client.table("source_documents").select("storage_path").eq(  # type: ignore[union-attr]
+            "id", document_id
+        ).eq("user_id", user_id).maybe_single().execute()
+        row = response.data if response else None
+        if row and row.get("storage_path"):
+            self._safe(
+                "remove rejected source object",
+                lambda: self.client.storage.from_("source-documents").remove([row["storage_path"]]),  # type: ignore[union-attr]
+            )
+        self._safe(
+            "remove rejected source row",
+            lambda: self.client.table("source_documents").delete().eq("id", document_id).eq("user_id", user_id).execute(),  # type: ignore[union-attr]
+        )
+
+    def consume_rate_limit(self, bucket_key: str, limit: int, window_seconds: int) -> Dict[str, Any]:
+        if not self.enabled:
+            return {"allowed": True, "local_mode": True}
+        response = self.client.rpc("consume_rate_limit", {  # type: ignore[union-attr]
+            "p_bucket_key": bucket_key,
+            "p_limit": limit,
+            "p_window_seconds": window_seconds,
+        }).execute()
+        data = response.data
+        if isinstance(data, list):
+            data = data[0] if data else None
+        return data if isinstance(data, dict) else {"allowed": False, "retry_after_seconds": window_seconds}
 
     def quota_status(self, user_id: Optional[str]) -> Optional[Dict[str, Any]]:
         if not self.enabled or not user_id:

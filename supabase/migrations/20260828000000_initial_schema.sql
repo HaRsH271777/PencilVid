@@ -305,7 +305,7 @@
   grant update (full_name, avatar_url, phone, timezone, locale, onboarding_completed) on public.profiles to authenticated;
   grant usage, select on all sequences in schema public to authenticated;
   revoke execute on function public.complete_demo_checkout(text, integer) from public, anon;
-  grant execute on function public.complete_demo_checkout(text, integer) to authenticated;
+  revoke execute on function public.complete_demo_checkout(text, integer) from authenticated;
 
   insert into storage.buckets (id, name, public) values
     ('avatars', 'avatars', false),

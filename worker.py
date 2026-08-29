@@ -1,0 +1,150 @@
+"""Durable Supabase-backed video render worker.
+
+Run this as a process separate from the Flask web service:
+
+    python worker.py
+
+The database claim function uses ``FOR UPDATE SKIP LOCKED``, so multiple
+workers can poll safely. Web deployments should set JOB_EXECUTION_MODE=queue.
+"""
+
+from __future__ import annotations
+
+import os
+import signal
+import socket
+import threading
+import time
+import uuid
+from pathlib import Path
+
+from app import (
+    DOC_DIRECTOR_ANCHOR_CHARS,
+    DOC_MAX_CHARS,
+    DOC_UPLOAD_DIR,
+    ENABLE_STREAMING,
+    _extract_document_text,
+    _run_streaming_video_job,
+    _run_video_job,
+    _set_job,
+)
+from supabase_store import supabase_store
+
+
+POLL_SECONDS = max(0.5, float(os.environ.get("WORKER_POLL_SECONDS", "2")))
+HEARTBEAT_SECONDS = max(10, int(os.environ.get("WORKER_HEARTBEAT_SECONDS", "30")))
+STALE_AFTER_SECONDS = max(60, int(os.environ.get("WORKER_STALE_AFTER_SECONDS", "300")))
+WORKER_ID = os.environ.get(
+    "WORKER_ID", f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+)
+_stop = threading.Event()
+
+
+def _request_stop(_signum=None, _frame=None) -> None:
+    _stop.set()
+
+
+def _heartbeat(job_id: str) -> None:
+    while not _stop.wait(HEARTBEAT_SECONDS):
+        try:
+            if not supabase_store.heartbeat_job(job_id, WORKER_ID):
+                return
+        except Exception:
+            # A transient heartbeat failure should not destroy an otherwise
+            # healthy render. Stale recovery remains the final safety net.
+            continue
+
+
+def _hydrate_payload(job: dict) -> tuple[dict, Path | None]:
+    request_payload = job.get("request_payload")
+    payload = dict(request_payload) if isinstance(request_payload, dict) else {}
+    payload.update({
+        "prompt": str(job.get("prompt") or ""),
+        "duration_seconds": float(job.get("requested_duration_seconds") or 0),
+        "audience": str(job.get("audience") or "general learner"),
+        "style": str(job.get("style") or "default"),
+        "mode": str(job.get("mode") or "batch"),
+        "quality_mode": str(job.get("quality_mode") or "balanced"),
+        "user_id": str(job.get("user_id") or ""),
+        "source_document_id": job.get("source_document_id"),
+    })
+    downloaded_path: Path | None = None
+    if job.get("source_document_id"):
+        source = supabase_store.source_document_blob(str(job["source_document_id"]))
+        if not source:
+            raise RuntimeError("The source document could not be restored from durable storage")
+        original_name, body = source
+        suffix = Path(original_name).suffix.lower() or ".txt"
+        downloaded_path = DOC_UPLOAD_DIR / f"worker-{uuid.uuid4().hex[:12]}{suffix}"
+        downloaded_path.write_bytes(body)
+        full_text = _extract_document_text(downloaded_path)[:DOC_MAX_CHARS]
+        payload["full_source_text"] = full_text
+        payload["source_text"] = full_text[:DOC_DIRECTOR_ANCHOR_CHARS]
+    else:
+        payload["full_source_text"] = ""
+        payload["source_text"] = ""
+    return payload, downloaded_path
+
+
+def run_once() -> bool:
+    job = supabase_store.claim_job(WORKER_ID)
+    if not job:
+        return False
+    job_id = str(job["id"])
+    downloaded_path: Path | None = None
+    heartbeat = threading.Thread(target=_heartbeat, args=(job_id,), daemon=True)
+    heartbeat.start()
+    try:
+        payload, downloaded_path = _hydrate_payload(job)
+        _set_job(
+            job_id,
+            status="running",
+            stage="starting",
+            progress=max(1, int(job.get("progress") or 0)),
+            detail="Render worker started",
+            prompt=payload["prompt"],
+            audience=payload["audience"],
+            style=payload["style"],
+            created_at=str(job.get("created_at") or ""),
+            scenes=[],
+            target_duration_seconds=payload["duration_seconds"],
+            user_id=payload["user_id"],
+        )
+        if payload["mode"] == "streaming" and ENABLE_STREAMING:
+            _run_streaming_video_job(job_id, payload)
+        else:
+            _run_video_job(job_id, payload)
+    except Exception as exc:
+        _set_job(
+            job_id,
+            status="failed",
+            stage="failed",
+            detail="Video generation failed",
+            error=str(exc),
+        )
+    finally:
+        if downloaded_path:
+            downloaded_path.unlink(missing_ok=True)
+    return True
+
+
+def main() -> None:
+    if not supabase_store.enabled:
+        raise SystemExit("The durable worker requires Supabase server credentials")
+    signal.signal(signal.SIGINT, _request_stop)
+    signal.signal(signal.SIGTERM, _request_stop)
+    try:
+        supabase_store.recover_stale_jobs(STALE_AFTER_SECONDS)
+    except Exception:
+        pass
+    while not _stop.is_set():
+        try:
+            worked = run_once()
+        except Exception:
+            worked = False
+        if not worked:
+            _stop.wait(POLL_SECONDS)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { updateUserPlan, useAuthUser, type AuthUser } from '../../lib/auth'
+import { useAuthUser, type AuthUser } from '../../lib/auth'
 import styles from './Plans.module.css'
 
 type PlanName = AuthUser['plan']
@@ -78,19 +78,14 @@ export function Plans() {
   const [notice, setNotice] = useState(upgradedTo ? `Payment confirmed. Your ${upgradedTo} plan is active.` : '')
   if (!user) return <Navigate replace to="/auth" />
 
-  const choosePlan = async (plan: PlanName) => {
+  const choosePlan = (plan: PlanName) => {
     if (plan === user.plan) return
     const planRank: Record<PlanName, number> = { Free: 0, Pro: 1, 'Pro Ultra': 2 }
     if (planRank[plan] > planRank[user.plan]) {
       navigate(`/checkout?plan=${encodeURIComponent(plan)}`)
       return
     }
-    try {
-      await updateUserPlan(user, plan)
-      setNotice(`Plan changed. ${plan} is now active.`)
-    } catch (planError) {
-      setNotice(planError instanceof Error ? planError.message : 'Could not change your plan.')
-    }
+    setNotice('Plan downgrades will be available through the verified billing portal once billing is configured.')
   }
 
   return (
@@ -127,7 +122,7 @@ export function Plans() {
                 </div>
                 <div className={styles.cardActions}>
                   <div className={styles.price}><span>$</span>{plan.price}<small>{plan.period}</small></div>
-                  <button aria-pressed={current} className={styles.cardButton} disabled={current} onClick={() => void choosePlan(plan.name)} type="button">{current ? 'Current plan' : `Choose ${plan.name}`}</button>
+                  <button aria-pressed={current} className={styles.cardButton} disabled={current} onClick={() => choosePlan(plan.name)} type="button">{current ? 'Current plan' : `Choose ${plan.name}`}</button>
                 </div>
               </div>
 

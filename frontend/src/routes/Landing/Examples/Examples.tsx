@@ -1,8 +1,6 @@
-import { useEffect, useState, type CSSProperties, type MouseEvent, type PointerEvent } from 'react'
+import { type CSSProperties, type MouseEvent, type PointerEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useReveal, useSpotlight } from '../../../hooks'
-import { listVideos, videoStreamUrl } from '../../../lib/api'
-import type { VideoSummary } from '../../../lib/types'
 import { DemoArt, type DemoKind } from '../Hero/Hero'
 import styles from '../Sections.module.css'
 
@@ -14,16 +12,6 @@ const EXAMPLES: ReadonlyArray<{ title: string; category: string; duration: strin
 
 export function LandingExamples() {
   const reveal = useReveal<HTMLDivElement>()
-  const [videos, setVideos] = useState<VideoSummary[]>([])
-
-  useEffect(() => {
-    let current = true
-    listVideos().then((videos) => {
-      if (current) setVideos(videos.filter((video) => video.status === 'ready').slice(0, 3))
-    }).catch(() => undefined)
-    return () => { current = false }
-  }, [])
-
   return (
     <section className={styles.section} id="examples">
       <div className="shell">
@@ -33,10 +21,10 @@ export function LandingExamples() {
           <p>Three questions, shaped into clear visual stories.</p>
         </div>
         <div className={`${styles.exampleGrid} ${styles.reveal} ${reveal.className}`} ref={reveal.ref}>
-          <ExampleCard {...EXAMPLES[0]} big poster={videos[0]?.posterUrl} to={videos[0] ? `/app/videos/${videos[0].id}` : '/app/videos'} videoUrl={videos[0] ? videoStreamUrl(videos[0].id) : undefined} />
+          <ExampleCard {...EXAMPLES[0]} big to="/app" />
           <div className={styles.exampleSide}>
-            <ExampleCard {...EXAMPLES[1]} poster={videos[1]?.posterUrl} to={videos[1] ? `/app/videos/${videos[1].id}` : '/app/videos'} videoUrl={videos[1] ? videoStreamUrl(videos[1].id) : undefined} />
-            <ExampleCard {...EXAMPLES[2]} poster={videos[2]?.posterUrl} to={videos[2] ? `/app/videos/${videos[2].id}` : '/app/videos'} videoUrl={videos[2] ? videoStreamUrl(videos[2].id) : undefined} />
+            <ExampleCard {...EXAMPLES[1]} to="/app" />
+            <ExampleCard {...EXAMPLES[2]} to="/app" />
           </div>
         </div>
       </div>
@@ -44,7 +32,7 @@ export function LandingExamples() {
   )
 }
 
-function ExampleCard({ title, category, duration, kind, big = false, poster, to, videoUrl }: typeof EXAMPLES[number] & { big?: boolean; poster?: string; to: string; videoUrl?: string }) {
+function ExampleCard({ title, category, duration, kind, big = false, to }: typeof EXAMPLES[number] & { big?: boolean; to: string }) {
   const spotlight = useSpotlight<HTMLAnchorElement>()
   const navigate = useNavigate()
   const transitionName = `video-${kind}`
@@ -80,7 +68,6 @@ function ExampleCard({ title, category, duration, kind, big = false, poster, to,
     <Link className={`${styles.exampleCard} ${big ? styles.exampleBig : ''}`} onClick={openWithTransition} onPointerEnter={playPreview} onPointerLeave={stopPreview} onPointerMove={tilt} ref={spotlight} style={{ viewTransitionName: transitionName } as CSSProperties} to={to}>
       <span className={styles.exampleMedia}>
         <DemoArt kind={kind} />
-        {videoUrl && <video aria-hidden="true" className={styles.exampleVideo} loop muted onTimeUpdate={(event) => { if (event.currentTarget.currentTime >= 3) event.currentTarget.currentTime = 0 }} playsInline poster={poster} preload="metadata" src={videoUrl} />}
         <span className={styles.play}>▶</span>
         <span className={styles.duration}>{duration}</span>
       </span>

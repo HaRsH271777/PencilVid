@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
 import { useCountUp, useMagnetic } from '../../../hooks'
 import { Button, ButtonLink } from '../../../components/Button/Button'
-import { listVideos, videoStreamUrl } from '../../../lib/api'
 import styles from './Hero.module.css'
 
 type DemoPhase = 'typing' | 'generating' | 'ready'
@@ -61,7 +60,13 @@ export function LandingHero() {
   const [phase, setPhase] = useState<DemoPhase>(reduced ? 'ready' : 'typing')
   const [typed, setTyped] = useState(reduced ? DEMOS[DEMOS.length - 1].question : '')
   const [generation, setGeneration] = useState(reduced ? 100 : 0)
-  const [demoVideo, setDemoVideo] = useState<{ poster?: string; title: string; url: string } | null>(null)
+  const publicDemoUrl = String(import.meta.env.VITE_PUBLIC_DEMO_URL || '').trim()
+  const publicDemoPoster = String(import.meta.env.VITE_PUBLIC_DEMO_POSTER_URL || '').trim()
+  const demoVideo = publicDemoUrl ? {
+    poster: publicDemoPoster || undefined,
+    title: 'Simi Studio explanation',
+    url: publicDemoUrl,
+  } : null
   const heroRef = useRef<HTMLElement>(null)
   const demoRef = useRef<HTMLDivElement>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -69,16 +74,6 @@ export function LandingHero() {
   const primaryRef = useMagnetic<HTMLAnchorElement>(.18, 72, 1)
   const count = useCountUp(2847)
   const demo = DEMOS[demoIndex]
-
-  useEffect(() => {
-    let current = true
-    listVideos().then((videos) => {
-      const ready = videos.filter((video) => video.status === 'ready')
-      const sample = [...ready].sort((a, b) => Math.abs(a.durationSec - 30) - Math.abs(b.durationSec - 30))[0]
-      if (current && sample) setDemoVideo({ poster: sample.posterUrl, title: sample.title, url: videoStreamUrl(sample.id) })
-    }).catch(() => undefined)
-    return () => { current = false }
-  }, [])
 
   const restartDemo = () => {
     setTyped('')
@@ -147,7 +142,7 @@ export function LandingHero() {
               <ButtonLink arrow className={styles.primary} ref={primaryRef} to="/app" viewTransition>Start explaining</ButtonLink>
               <small>~6 min · no editing</small>
             </div>
-            <Button className={styles.secondary} disabled={!demoVideo} onClick={openVideoDemo} variant="ghost">▶ <span>{demoVideo ? 'Watch a 30s demo' : 'Loading demo…'}</span></Button>
+            <Button className={styles.secondary} disabled={!demoVideo} onClick={openVideoDemo} variant="ghost">▶ <span>{demoVideo ? 'Watch a 30s demo' : 'Demo coming soon'}</span></Button>
           </div>
           <div className={styles.trust}>
             <span className={styles.heroAvatars} aria-label="Used by thousands of curious learners"><b>AK</b><b>MJ</b><b>RS</b></span>

@@ -1,10 +1,13 @@
 import copy
+import hashlib
+import hmac
 import json
 import os
 import re
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,7 +17,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, disconnect, join_room
+from werkzeug.utils import secure_filename
 
 # Windows services and redirected processes commonly expose a legacy CP1252
 # console. LLM output is Unicode, so diagnostic prints must never be able to
@@ -156,9 +160,42 @@ MAX_SCRIPT_REVISIONS = int(
 
 app = Flask(__name__, template_folder="templates")
 
+APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
+IS_PRODUCTION = APP_ENV == "production"
+MAX_UPLOAD_BYTES = max(1, int(os.environ.get("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))))
+MAX_PROMPT_CHARS = max(100, int(os.environ.get("MAX_PROMPT_CHARS", "4000")))
+MAX_VIDEO_DURATION_SECONDS = max(20, int(os.environ.get("MAX_VIDEO_DURATION_SECONDS", "1800")))
+GENERATION_RATE_LIMIT = max(1, int(os.environ.get("GENERATION_RATE_LIMIT", "10")))
+GENERATION_RATE_WINDOW_SECONDS = max(1, int(os.environ.get("GENERATION_RATE_WINDOW_SECONDS", "3600")))
+JOB_EXECUTION_MODE = os.environ.get(
+    "JOB_EXECUTION_MODE", "queue" if IS_PRODUCTION else "inline"
+).strip().lower()
+if JOB_EXECUTION_MODE not in {"inline", "queue"}:
+    raise RuntimeError("JOB_EXECUTION_MODE must be 'inline' or 'queue'")
+if IS_PRODUCTION and JOB_EXECUTION_MODE != "queue":
+    raise RuntimeError("Production requires JOB_EXECUTION_MODE=queue")
+if IS_PRODUCTION and not supabase_store.enabled:
+    raise RuntimeError("Production requires SUPABASE_URL and SUPABASE_SECRET_KEY")
+
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES + (256 * 1024)
+
+_configured_origins = [
+    value.strip() for value in os.environ.get(
+        "ALLOWED_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173"
+    ).split(",") if value.strip()
+]
+if IS_PRODUCTION and not _configured_origins:
+    raise RuntimeError("ALLOWED_ORIGINS is required in production")
+
+_media_signing_key = os.environ.get("MEDIA_SIGNING_KEY", "").encode("utf-8")
+if IS_PRODUCTION and len(_media_signing_key) < 32:
+    raise RuntimeError("MEDIA_SIGNING_KEY must contain at least 32 characters in production")
+if not _media_signing_key:
+    _media_signing_key = uuid.uuid4().hex.encode("ascii")
+
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=_configured_origins,
     async_mode="threading",
     logger=False,
     engineio_logger=False,
@@ -172,6 +209,82 @@ _segment_state: Dict[str, Dict[str, Any]] = {}
 _segment_state_lock = threading.Lock()
 
 STREAM_PLAYER_ROUTE = "/stream" if ENABLE_STREAMING else None
+
+
+def _auth_error_status(message: Optional[str]) -> int:
+    return 503 if message and "temporarily unavailable" in message.lower() else 401
+
+
+def _authorized_job(job_id: str) -> Tuple[Optional[str], Optional[Tuple[Any, int]]]:
+    user_id, error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    if error:
+        return None, (jsonify({"error": error}), _auth_error_status(error))
+    if not supabase_store.owns_job(user_id, job_id):
+        return user_id, (jsonify({"error": "resource not found"}), 404)
+    return user_id, None
+
+
+def _signed_media_url(path: str, ttl_seconds: int = 900) -> str:
+    expires = int(time.time()) + max(30, ttl_seconds)
+    payload = f"{path}|{expires}".encode("utf-8")
+    signature = hmac.new(_media_signing_key, payload, hashlib.sha256).hexdigest()
+    separator = "&" if "?" in path else "?"
+    return f"{path}{separator}expires={expires}&signature={signature}"
+
+
+def _valid_media_signature() -> bool:
+    try:
+        expires = int(request.args.get("expires", "0"))
+    except ValueError:
+        return False
+    if expires < int(time.time()) or expires > int(time.time()) + 3600:
+        return False
+    payload = f"{request.path}|{expires}".encode("utf-8")
+    expected = hmac.new(_media_signing_key, payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, request.args.get("signature", ""))
+
+
+def _authorize_media(job_id: str) -> Optional[Tuple[Any, int]]:
+    if _valid_media_signature():
+        return None
+    _, response = _authorized_job(job_id)
+    return response
+
+
+def _require_admin() -> Tuple[Optional[str], Optional[Tuple[Any, int]]]:
+    user_id, error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    if error:
+        return None, (jsonify({"error": error}), _auth_error_status(error))
+    if not supabase_store.enabled:
+        if os.environ.get("ALLOW_LOCAL_DEBUG_ENDPOINTS", "0") != "1":
+            return None, (jsonify({"error": "not found"}), 404)
+        return user_id, None
+    admins = {
+        item.strip() for item in os.environ.get("ADMIN_USER_IDS", "").split(",")
+        if item.strip()
+    }
+    if not user_id or user_id not in admins:
+        return user_id, (jsonify({"error": "not found"}), 404)
+    return user_id, None
+
+
+def _secure_local_media_urls(job: Dict[str, Any]) -> Dict[str, Any]:
+    secured = copy.deepcopy(job)
+    for key in ("output_url", "manifest_url", "evaluation_url", "stream_url"):
+        value = secured.get(key)
+        if isinstance(value, str) and value.startswith("/"):
+            secured[key] = _signed_media_url(value)
+    for scene in secured.get("scenes", []):
+        for key in ("image_url", "imageUrl"):
+            value = scene.get(key)
+            if isinstance(value, str) and value.startswith("/"):
+                scene[key] = _signed_media_url(value)
+    return secured
+
+
+@app.errorhandler(413)
+def request_too_large(_error):
+    return jsonify({"error": f"Upload exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit"}), 413
 
 
 def _set_job(job_id: str, **changes: Any) -> None:
@@ -1207,10 +1320,51 @@ def _manifest_video_detail(job_id: str, manifest: Dict[str, Any]) -> Dict[str, A
     }
 
 
+def _database_video_detail(row: Dict[str, Any], scenes: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    job_id = str(row["id"])
+    video_url = supabase_store.signed_storage_url("video-assets", row.get("video_storage_path"))
+    if not video_url:
+        return None
+    manifest = row.get("manifest") if isinstance(row.get("manifest"), dict) else {}
+    coverage = row.get("coverage") if isinstance(row.get("coverage"), list) else []
+    scene_payloads = []
+    for scene in scenes:
+        image_url = supabase_store.signed_storage_url("video-assets", scene.get("image_storage_path"))
+        scene_payloads.append({
+            "index": int(scene.get("scene_index", len(scene_payloads))),
+            "title": str(scene.get("title") or f"Scene {len(scene_payloads) + 1}"),
+            "narration": str(scene.get("narration") or ""),
+            "status": str(scene.get("status") or "done"),
+            "imageUrl": image_url,
+        })
+    scene_count = len(scene_payloads)
+    coverage_map = [
+        min(max(0, scene_count - 1), round(index * max(0, scene_count - 1) / max(1, len(coverage) - 1)))
+        for index in range(len(coverage))
+    ]
+    return {
+        "id": job_id,
+        "title": str(row.get("title") or "Untitled explanation"),
+        "description": str(row.get("description") or ""),
+        "audience": str(row.get("audience") or "beginner"),
+        "durationSec": max(0, round(float(row.get("duration_seconds") or 0))),
+        "style": str(row.get("style") or "default"),
+        "scenes": scene_payloads,
+        "coverage": [str(item) for item in coverage],
+        "coverageSceneMap": coverage_map,
+        "videoUrl": video_url,
+        "posterUrl": supabase_store.signed_storage_url("video-assets", row.get("poster_storage_path")),
+        "manifest": manifest,
+    }
+
+
 @app.route("/media/jobs/<job_id>/scenes/<int:scene_index>.png")
 def generated_scene_image(job_id: str, scene_index: int):
     if not re.fullmatch(r"[0-9a-f]{12}", job_id) or scene_index < 0:
         return jsonify({"error": "invalid scene path"}), 404
+    denied = _authorize_media(job_id)
+    if denied:
+        return denied
     image_path = _scene_image_path(job_id, scene_index)
     if image_path is None:
         return jsonify({"error": "scene image not found"}), 404
@@ -1219,17 +1373,48 @@ def generated_scene_image(job_id: str, scene_index: int):
 
 @app.route("/api/videos", methods=["GET"])
 def list_videos():
-    owned_job_ids, auth_error, auth_status = supabase_store.authorized_job_ids(
-        request.headers.get("Authorization", "")
-    )
+    user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
     if auth_error:
-        return jsonify({"error": auth_error}), auth_status
+        return jsonify({"error": auth_error}), _auth_error_status(auth_error)
+
+    owned_job_ids = supabase_store.owned_job_ids(user_id)
 
     def is_owned(job_id: str) -> bool:
         return owned_job_ids is None or job_id in owned_job_ids
 
     summaries: List[Dict[str, Any]] = []
     seen = set()
+    if supabase_store.enabled:
+        try:
+            for row in supabase_store.list_video_records(user_id) or []:
+                summaries.append({
+                    "id": str(row["id"]),
+                    "title": str(row.get("title") or "Untitled explanation"),
+                    "durationSec": max(0, round(float(row.get("duration_seconds") or 0))),
+                    "audience": str(row.get("audience") or "beginner"),
+                    "createdAt": str(row.get("created_at") or _utc_now_iso()),
+                    "posterUrl": supabase_store.signed_storage_url("video-assets", row.get("poster_storage_path")),
+                    "status": "ready",
+                })
+                seen.add(str(row["id"]))
+            for job in supabase_store.active_job_records(user_id):
+                if str(job["id"]) in seen:
+                    continue
+                summaries.insert(0, {
+                    "id": str(job["id"]),
+                    "title": str(job.get("prompt") or "Creating explanation"),
+                    "durationSec": max(0, round(float(job.get("requested_duration_seconds") or 0))),
+                    "audience": str(job.get("audience") or "beginner"),
+                    "createdAt": str(job.get("created_at") or _utc_now_iso()),
+                    "posterUrl": None,
+                    "status": "generating",
+                    "progressPercent": int(job.get("progress") or 0),
+                })
+            return jsonify(summaries)
+        except Exception as exc:
+            app.logger.error("Unable to list durable videos: %s", type(exc).__name__)
+            return jsonify({"error": "Video library is temporarily unavailable"}), 503
+
     if OUTPUT_DIR.is_dir():
         manifests = sorted(
             OUTPUT_DIR.glob("*/manifest.json"),
@@ -1286,20 +1471,65 @@ def list_videos():
 def video_detail(job_id: str):
     user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
     if auth_error:
-        return jsonify({"error": auth_error}), 401
+        return jsonify({"error": auth_error}), _auth_error_status(auth_error)
     if not supabase_store.owns_job(user_id, job_id):
         return jsonify({"error": "video not found"}), 404
+    if supabase_store.enabled:
+        try:
+            row = supabase_store.video_record(user_id, job_id)
+            if not row:
+                return jsonify({"error": "video not found"}), 404
+            detail = _database_video_detail(row, supabase_store.scene_records(user_id, job_id))
+            if not detail:
+                return jsonify({"error": "Video storage is temporarily unavailable"}), 503
+            return jsonify(detail)
+        except Exception as exc:
+            app.logger.error("Unable to load durable video %s: %s", job_id, type(exc).__name__)
+            return jsonify({"error": "Video is temporarily unavailable"}), 503
     manifest = _load_video_manifest(job_id)
     if manifest is None:
         return jsonify({"error": "video not found"}), 404
     return jsonify(_manifest_video_detail(job_id, manifest))
 
 
+@app.route("/api/billing/checkout", methods=["POST"])
+def create_billing_checkout():
+    """Server boundary for a future verified payment-provider checkout.
+
+    Paid plans are deliberately unavailable until a provider adapter and
+    signed webhook are configured. The browser can no longer mutate plans.
+    """
+    _user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    if auth_error:
+        return jsonify({"error": auth_error}), _auth_error_status(auth_error)
+    data = request.get_json(silent=True) or {}
+    if data.get("plan") not in {"pro", "pro_ultra"}:
+        return jsonify({"error": "Unknown paid plan"}), 400
+    return jsonify({
+        "error": "Secure billing is not configured yet. No plan change was made.",
+        "code": "billing_not_configured",
+    }), 503
+
+
 @app.route("/api/videos", methods=["POST"])
 def create_video():
     user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
     if auth_error:
-        return jsonify({"error": auth_error}), 401
+        return jsonify({"error": auth_error}), _auth_error_status(auth_error)
+    try:
+        rate = supabase_store.consume_rate_limit(
+            f"generation:{user_id or request.remote_addr or 'local'}",
+            GENERATION_RATE_LIMIT,
+            GENERATION_RATE_WINDOW_SECONDS,
+        )
+    except Exception as exc:
+        app.logger.error("Generation rate limit failed: %s", type(exc).__name__)
+        return jsonify({"error": "Request protection is temporarily unavailable"}), 503
+    if not rate.get("allowed", False):
+        retry_after = int(rate.get("retry_after_seconds") or GENERATION_RATE_WINDOW_SECONDS)
+        response = jsonify({"error": "Too many generation requests", "retry_after_seconds": retry_after})
+        response.headers["Retry-After"] = str(retry_after)
+        return response, 429
     quota = supabase_store.quota_status(user_id)
     if quota and not quota.get("allowed"):
         status = 503 if quota.get("error") else 429
@@ -1316,6 +1546,18 @@ def create_video():
     prompt = str(data.get("prompt", "")).strip()
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
+    if len(prompt) > MAX_PROMPT_CHARS:
+        return jsonify({"error": f"prompt must be at most {MAX_PROMPT_CHARS} characters"}), 400
+
+    try:
+        duration_seconds = float(data.get("duration_seconds", 120))
+    except (TypeError, ValueError):
+        return jsonify({"error": "duration_seconds must be a number"}), 400
+
+    if duration_seconds < 20 or duration_seconds > MAX_VIDEO_DURATION_SECONDS:
+        return jsonify({
+            "error": f"duration_seconds must be between 20 and {MAX_VIDEO_DURATION_SECONDS}"
+        }), 400
 
     # ---- optional document input ---------------------------------------------
     source_text = ""
@@ -1324,8 +1566,12 @@ def create_video():
     if doc_file is not None and getattr(doc_file, "filename", None):
         suffix = Path(str(doc_file.filename)).suffix.lower()
         if suffix in {".txt", ".md", ".markdown", ".pdf", ".docx", ".pptx"}:
+            safe_name = secure_filename(str(doc_file.filename)) or f"source{suffix}"
             doc_path = DOC_UPLOAD_DIR / f"{uuid.uuid4().hex[:12]}{suffix}"
             doc_file.save(str(doc_path))
+            if doc_path.stat().st_size > MAX_UPLOAD_BYTES:
+                doc_path.unlink(missing_ok=True)
+                return jsonify({"error": f"document must be no larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB"}), 413
             # Full extraction (up to DOC_MAX_CHARS) feeds the per-scene
             # visual-planner excerpts; only a small TPM-safe anchor goes to
             # the director so the planning call never breaches the TPM limit.
@@ -1333,24 +1579,19 @@ def create_video():
             source_text = full_text[:DOC_DIRECTOR_ANCHOR_CHARS]
             source_document_id = supabase_store.create_source_document(
                 user_id,
-                str(doc_file.filename),
+                safe_name,
                 str(doc_path),
                 getattr(doc_file, "mimetype", None),
                 doc_path.stat().st_size,
                 len(full_text),
             )
+            if supabase_store.enabled and not source_document_id:
+                doc_path.unlink(missing_ok=True)
+                return jsonify({"error": "Document storage is temporarily unavailable"}), 503
             print(f"Document uploaded: {doc_file.filename} ({len(full_text)} chars; "
                   f"{len(source_text)} char anchor to director)")
         else:
             return jsonify({"error": f"unsupported document type: {suffix}"}), 400
-
-    try:
-        duration_seconds = float(data.get("duration_seconds", 120))
-    except (TypeError, ValueError):
-        return jsonify({"error": "duration_seconds must be a number"}), 400
-
-    if duration_seconds < 20 or duration_seconds > 1800:
-        return jsonify({"error": "duration_seconds must be between 20 and 1800 for this MVP"}), 400
 
     job_id = uuid.uuid4().hex[:12]
     style = str(data.get("style", "")).strip().lower()
@@ -1375,9 +1616,16 @@ def create_video():
     }
     reservation = supabase_store.create_job(user_id, job_id, payload)
     if not reservation.get("allowed", False):
+        supabase_store.delete_source_document(user_id, source_document_id)
         status = 503 if reservation.get("error") else 429
+        reason = reservation.get("reason")
+        message = reservation.get("error") or {
+            "duration_limit": f"Your plan supports videos up to {reservation.get('max_duration_seconds')} seconds",
+            "concurrency_limit": "Finish an active video before starting another",
+            "quota_limit": "Video limit reached",
+        }.get(reason, "Video limit reached")
         return jsonify({
-            "error": reservation.get("error") or "Video limit reached",
+            "error": message,
             "quota": reservation,
         }), status
 
@@ -1395,6 +1643,14 @@ def create_video():
         target_duration_seconds=duration_seconds,
         user_id=user_id,
     )
+
+    if JOB_EXECUTION_MODE == "queue":
+        return jsonify({
+            "job_id": job_id,
+            "status_url": f"/api/jobs/{job_id}",
+            "mode": payload["mode"],
+            "queued": True,
+        }), 202
 
     if payload["mode"] == "streaming" and ENABLE_STREAMING:
         from segment_pipeline import run_streaming_pipeline
@@ -1562,6 +1818,7 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
                     "llm_cost_usd": llm_usage.get("estimated_usd_cost"),
                     "llm_cost_inr": llm_usage.get("estimated_inr_cost"),
                 },
+                to=f"job:{job_id}",
             )
 
     except Exception as exc:
@@ -1589,6 +1846,7 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
                         "error": str(exc),
                         "evaluation_url": f"/outputs/{job_id}/evaluation.json" if evaluation else None,
                     },
+                    to=f"job:{job_id}",
                 )
         except Exception:
             pass
@@ -1598,10 +1856,52 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
 def job_status(job_id: str):
     user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
     if auth_error:
-        return jsonify({"error": auth_error}), 401
+        return jsonify({"error": auth_error}), _auth_error_status(auth_error)
     if not supabase_store.owns_job(user_id, job_id):
         return jsonify({"error": "job not found"}), 404
     job = _get_job(job_id)
+    if job and job.get("status") == "completed" and supabase_store.enabled:
+        try:
+            video = supabase_store.video_record(user_id, job_id)
+            if video:
+                signed_video = supabase_store.signed_storage_url(
+                    "video-assets", video.get("video_storage_path")
+                )
+                if not signed_video:
+                    return jsonify({"error": "Video storage is temporarily unavailable"}), 503
+                job["output_url"] = signed_video
+                job["final_duration_seconds"] = video.get("duration_seconds")
+                job.pop("manifest_url", None)
+                job.pop("evaluation_url", None)
+        except Exception as exc:
+            app.logger.error("Unable to sign completed job %s: %s", job_id, type(exc).__name__)
+            return jsonify({"error": "Video storage is temporarily unavailable"}), 503
+    if not job and supabase_store.enabled:
+        try:
+            record = supabase_store.job_record(user_id, job_id)
+        except Exception as exc:
+            app.logger.error("Unable to load durable job %s: %s", job_id, type(exc).__name__)
+            return jsonify({"error": "Job status is temporarily unavailable"}), 503
+        if record:
+            job = {
+                "job_id": job_id,
+                "status": record.get("status"),
+                "stage": record.get("stage"),
+                "progress": record.get("progress"),
+                "detail": record.get("detail"),
+                "error": record.get("error_message"),
+                "prompt": record.get("prompt"),
+                "audience": record.get("audience"),
+                "style": record.get("style"),
+                "target_duration_seconds": record.get("requested_duration_seconds"),
+                "created_at": record.get("created_at"),
+                "scenes": [],
+            }
+            if record.get("status") == "completed":
+                video = supabase_store.video_record(user_id, job_id)
+                if video:
+                    signed_video = supabase_store.signed_storage_url("video-assets", video.get("video_storage_path"))
+                    job.update({"output_url": signed_video, "final_duration_seconds": video.get("duration_seconds")})
     if not job:
         # In-memory job state is intentionally lightweight and disappears when
         # the development server reloads. Completed artifacts are authoritative;
@@ -1665,7 +1965,7 @@ def job_status(job_id: str):
             job["elapsed_sec"] = 0
     else:
         job["elapsed_sec"] = 0
-    return jsonify(job)
+    return jsonify(_secure_local_media_urls(job))
 
 
 @app.route("/api/logs/<job_id>")
@@ -1673,6 +1973,9 @@ def job_logs_summary(job_id: str):
     """Per-run logging: totals, per-call tokens, latency, cost estimate."""
     if not re.fullmatch(r"[0-9a-f]{12}", job_id):
         return jsonify({"error": "invalid job id"}), 404
+    _, denied = _authorized_job(job_id)
+    if denied:
+        return denied
     try:
         from run_log import get_summary
 
@@ -1686,6 +1989,9 @@ def job_logs_calls(job_id: str):
     """Per-run logging: raw call-by-call records."""
     if not re.fullmatch(r"[0-9a-f]{12}", job_id):
         return jsonify({"error": "invalid job id"}), 404
+    _, denied = _authorized_job(job_id)
+    if denied:
+        return denied
     try:
         from run_log import get_calls
 
@@ -1699,6 +2005,9 @@ def job_logs_download(job_id: str):
     """Download every recorded LLM input/output plus usage metadata."""
     if not re.fullmatch(r"[0-9a-f]{12}", job_id):
         return jsonify({"error": "invalid job id"}), 404
+    _, denied = _authorized_job(job_id)
+    if denied:
+        return denied
     try:
         from run_log import get_download_bundle
 
@@ -1718,6 +2027,9 @@ def job_logs_download(job_id: str):
 @app.route("/api/keys")
 def key_pool_status():
     """Read-only live state of the multi-key API pool (debugging aid)."""
+    _, denied = _require_admin()
+    if denied:
+        return denied
     try:
         from api_key_pool import pool_status
         status = pool_status()
@@ -1734,6 +2046,9 @@ def segment_file(job_id: str, filename: str):
     """Serve per-scene streaming assets, the live stream.mp4, and offsets."""
     if not re.fullmatch(r"[0-9a-f]{12}", job_id):
         return jsonify({"error": "invalid job id"}), 404
+    denied = _authorize_media(job_id)
+    if denied:
+        return denied
     clean = filename.replace("\\", "/")
     if ".." in clean or clean.startswith("."):
         return jsonify({"error": "invalid path"}), 404
@@ -1788,6 +2103,9 @@ if ENABLE_STREAMING:
     def stream_player(job_id: str):
         if not re.fullmatch(r"[0-9a-f]{12}", job_id):
             return jsonify({"error": "invalid job id"}), 404
+        denied = _authorize_media(job_id)
+        if denied:
+            return denied
         job = _get_job(job_id)
         return render_template(
             "stream_player.html",
@@ -1797,27 +2115,41 @@ if ENABLE_STREAMING:
         )
 
     @socketio.on("connect")
-    def on_socketio_connect():
-        pass
+    def on_socketio_connect(auth=None):
+        token = str((auth or {}).get("token") or "").strip()
+        user_id, error = supabase_store.authenticate(f"Bearer {token}" if token else "")
+        if error or (supabase_store.enabled and not user_id):
+            return False
+        return True
 
     @socketio.on("rejoin")
     def on_rejoin(data):
         """Late-connecting browser asks for replay of already-ready segments."""
         job_id = str(data.get("job_id", ""))
+        token = str(data.get("token") or "").strip()
+        user_id, error = supabase_store.authenticate(f"Bearer {token}" if token else "")
+        if error or not supabase_store.owns_job(user_id, job_id):
+            disconnect()
+            return
+        room = f"job:{job_id}"
+        join_room(room)
         with _segment_state_lock:
             state = _segment_state.get(job_id)
         if state is None:
             return
         for seg in state["segments"]:
-            socketio.emit("segment_ready", {"job_id": job_id, "segment": seg})
+            socketio.emit("segment_ready", {"job_id": job_id, "segment": seg}, to=room)
         if state.get("plan"):
-            socketio.emit("plan_ready", {"job_id": job_id, "plan_summary": state["plan"]})
+            socketio.emit("plan_ready", {"job_id": job_id, "plan_summary": state["plan"]}, to=room)
 
 
 @app.route("/outputs/<job_id>/<path:filename>")
 def output_file(job_id: str, filename: str):
     if not re.fullmatch(r"[0-9a-f]{12}", job_id):
         return jsonify({"error": "invalid job id"}), 404
+    denied = _authorize_media(job_id)
+    if denied:
+        return denied
     directory = (OUTPUT_DIR / job_id).resolve()
     if not directory.is_dir():
         return jsonify({"error": "job output not found"}), 404
@@ -1827,6 +2159,11 @@ def output_file(job_id: str, filename: str):
 # Backward-compatible single-scene endpoint from your original app.
 @app.route("/generate", methods=["POST"])
 def generate_single_svg():
+    if IS_PRODUCTION or os.environ.get("ENABLE_LEGACY_GENERATE", "0") != "1":
+        return jsonify({"error": "not found"}), 404
+    user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    if auth_error:
+        return jsonify({"error": auth_error}), _auth_error_status(auth_error)
     try:
         data = request.get_json(silent=True) or {}
         text = str(data.get("text", "")).strip()

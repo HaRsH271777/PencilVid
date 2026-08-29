@@ -230,6 +230,9 @@ export function getVideo(id: string): Promise<VideoDetail> {
   return apiRequest<VideoDetail>(`/videos/${encodeURIComponent(id)}`)
 }
 
-export function videoStreamUrl(id: string) {
-  return outputPath(`${encodeURIComponent(id)}/final.mp4`)
+export function startBillingCheckout(plan: 'Pro' | 'Pro Ultra') {
+  return apiRequest<{ checkout_url: string }>('/billing/checkout', {
+    method: 'POST',
+    body: JSON.stringify({ plan: plan === 'Pro Ultra' ? 'pro_ultra' : 'pro' }),
+  })
 }
