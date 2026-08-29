@@ -61,6 +61,43 @@ class SupabaseStore:
             LOGGER.error("Supabase %s failed: %s", operation, exc)
             return default
 
+    def readiness(self) -> Dict[str, Dict[str, Any]]:
+        """Verify both PostgREST schema access and the private video bucket."""
+        failed = {
+            "database": {"ok": False, "detail": "unreachable"},
+            "storage": {"ok": False, "detail": "unreachable"},
+        }
+        if not self.enabled:
+            return failed
+        headers = {
+            "apikey": self.secret_key,
+            "Authorization": f"Bearer {self.secret_key}",
+        }
+        try:
+            database = httpx.get(
+                f"{self.url}/rest/v1/plan_catalog",
+                headers=headers,
+                params={"select": "id", "limit": "1"},
+                timeout=5.0,
+            )
+            storage = httpx.get(
+                f"{self.url}/storage/v1/bucket/video-assets",
+                headers=headers,
+                timeout=5.0,
+            )
+            return {
+                "database": {
+                    "ok": database.status_code == 200,
+                    "detail": "available" if database.status_code == 200 else "unavailable",
+                },
+                "storage": {
+                    "ok": storage.status_code == 200,
+                    "detail": "available" if storage.status_code == 200 else "unavailable",
+                },
+            }
+        except httpx.HTTPError:
+            return failed
+
     def _upload_file(self, bucket: str, remote_path: str, local_path: Path, mime_type: str) -> Optional[str]:
         if not self.client or not local_path.is_file():
             return None
@@ -369,6 +406,22 @@ class SupabaseStore:
             "p_stale_after_seconds": max(60, stale_after_seconds),
         }).execute()
         return int(response.data or 0)
+
+    def set_worker_status(
+        self, worker_id: str, status: str, current_job_id: Optional[str] = None,
+    ) -> None:
+        if not self.enabled:
+            return
+        payload = {
+            "worker_id": worker_id[:200],
+            "status": status,
+            "current_job_id": current_job_id,
+            "last_heartbeat_at": _now(),
+            "metadata": {"hostname": os.environ.get("HOSTNAME", "unknown")[:200]},
+        }
+        self.client.table("render_workers").upsert(  # type: ignore[union-attr]
+            payload, on_conflict="worker_id"
+        ).execute()
 
     def source_document_blob(self, document_id: Optional[str]) -> Optional[Tuple[str, bytes]]:
         if not self.enabled or not document_id:

@@ -12,6 +12,7 @@ order using the Supabase SQL Editor:
 1. `20260828000000_initial_schema.sql`
 2. `20260829000000_atomic_quotas_and_blue_plans.sql`
 3. `20260830000000_stage1_security_architecture.sql`
+4. `20260831000000_production_operations.sql`
 
 The migrations create Auth-linked profiles, preferences, plans, subscriptions,
 payment history, atomic quotas, source documents, generation jobs/events,
@@ -71,6 +72,17 @@ Deploy the Flask service with `JOB_EXECUTION_MODE=queue`, then run `worker.py`
 as a separate process using the same backend secrets and rendering tools.
 Workers atomically claim queued jobs, heartbeat while rendering, and allow
 stale interrupted work to be recovered without duplicate processing.
+
+Worker presence is recorded in the service-role-only `render_workers` table.
+Use `last_heartbeat_at` to alert when no worker has reported within 90 seconds.
+
+## Migration ownership after Stage 2
+
+The SQL Editor was appropriate for initial setup, but it does not populate the
+Supabase CLI migration history. Before the first automated release, baseline
+the already-applied versions once (see `DEPLOYMENT.md`). After that point, do
+not make remote schema edits in the Dashboard. Create and commit a timestamped
+file in `supabase/migrations/`; the approval-gated release workflow applies it.
 
 ## Data ownership
 

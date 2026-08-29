@@ -11,6 +11,7 @@ workers can poll safely. Web deployments should set JOB_EXECUTION_MODE=queue.
 from __future__ import annotations
 
 import os
+import logging
 import signal
 import socket
 import threading
@@ -38,15 +39,44 @@ WORKER_ID = os.environ.get(
     "WORKER_ID", f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 )
 _stop = threading.Event()
+LOGGER = logging.getLogger(__name__)
+_worker_status_lock = threading.Lock()
+_last_worker_status: tuple[float, str, str | None] | None = None
+WORKER_HEALTH_FILE = Path(
+    os.environ.get(
+        "WORKER_HEALTH_FILE",
+        "/tmp/pencilvid-worker-heartbeat" if os.name != "nt" else "work/worker-heartbeat",
+    )
+)
 
 
 def _request_stop(_signum=None, _frame=None) -> None:
     _stop.set()
 
 
+def _touch_health(status: str, job_id: str | None = None) -> None:
+    global _last_worker_status
+    WORKER_HEALTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    WORKER_HEALTH_FILE.write_text(str(time.time()), encoding="ascii")
+    now = time.monotonic()
+    with _worker_status_lock:
+        if (
+            _last_worker_status
+            and _last_worker_status[1:] == (status, job_id)
+            and now - _last_worker_status[0] < HEARTBEAT_SECONDS
+        ):
+            return
+        try:
+            supabase_store.set_worker_status(WORKER_ID, status, job_id)
+            _last_worker_status = (now, status, job_id)
+        except Exception as exc:
+            LOGGER.warning("worker_status_update_failed", extra={"error_type": type(exc).__name__})
+
+
 def _heartbeat(job_id: str) -> None:
     while not _stop.wait(HEARTBEAT_SECONDS):
         try:
+            _touch_health("busy", job_id)
             if not supabase_store.heartbeat_job(job_id, WORKER_ID):
                 return
         except Exception:
@@ -91,6 +121,7 @@ def run_once() -> bool:
     if not job:
         return False
     job_id = str(job["id"])
+    _touch_health("busy", job_id)
     downloaded_path: Path | None = None
     heartbeat = threading.Thread(target=_heartbeat, args=(job_id,), daemon=True)
     heartbeat.start()
@@ -125,6 +156,7 @@ def run_once() -> bool:
     finally:
         if downloaded_path:
             downloaded_path.unlink(missing_ok=True)
+        _touch_health("idle")
     return True
 
 
@@ -133,17 +165,23 @@ def main() -> None:
         raise SystemExit("The durable worker requires Supabase server credentials")
     signal.signal(signal.SIGINT, _request_stop)
     signal.signal(signal.SIGTERM, _request_stop)
+    _touch_health("idle")
     try:
         supabase_store.recover_stale_jobs(STALE_AFTER_SECONDS)
     except Exception:
         pass
     while not _stop.is_set():
         try:
+            _touch_health("idle")
             worked = run_once()
         except Exception:
             worked = False
         if not worked:
             _stop.wait(POLL_SECONDS)
+    try:
+        _touch_health("stopped")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ from flask import Flask, Response, jsonify, render_template, request, send_from_
 from flask_socketio import SocketIO, disconnect, join_room
 from werkzeug.utils import secure_filename
 
+from observability import configure_logging, install_request_logging
+
 # Windows services and redirected processes commonly expose a legacy CP1252
 # console. LLM output is Unicode, so diagnostic prints must never be able to
 # abort an otherwise successful generation request.
@@ -32,6 +34,7 @@ for _stream in (sys.stdout, sys.stderr):
             pass
 
 load_dotenv()
+configure_logging()
 
 ENABLE_STREAMING = (
     os.environ.get("USE_STREAMING", "1").strip().lower()
@@ -159,6 +162,7 @@ MAX_SCRIPT_REVISIONS = int(
 )
 
 app = Flask(__name__, template_folder="templates")
+install_request_logging(app)
 
 APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
@@ -285,6 +289,35 @@ def _secure_local_media_urls(job: Dict[str, Any]) -> Dict[str, Any]:
 @app.errorhandler(413)
 def request_too_large(_error):
     return jsonify({"error": f"Upload exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit"}), 413
+
+
+@app.route("/healthz")
+def health_check():
+    """Liveness only: this process can accept and return HTTP."""
+    return jsonify({
+        "status": "ok",
+        "service": "pencilvid-web",
+        "version": os.environ.get("APP_VERSION", "development"),
+    })
+
+
+@app.route("/readyz")
+def readiness_check():
+    """Readiness: required database, storage, and render tools are usable."""
+    from runtime_health import check_readiness
+
+    result = check_readiness(
+        store=supabase_store,
+        frontend_dist=FRONTEND_DIST,
+        work_dir=WORK_DIR,
+        output_dir=OUTPUT_DIR,
+        production=IS_PRODUCTION,
+    )
+    result.update({
+        "service": "pencilvid-web",
+        "version": os.environ.get("APP_VERSION", "development"),
+    })
+    return jsonify(result), 200 if result["status"] == "ready" else 503
 
 
 def _set_job(job_id: str, **changes: Any) -> None:

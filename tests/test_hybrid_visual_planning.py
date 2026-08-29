@@ -66,7 +66,8 @@ def test_hybrid_mode_is_wired_as_default_quality_path() -> None:
     visual_source = (ROOT / "visual_engine.py").read_text(encoding="utf-8")
     stream_source = (ROOT / "segment_pipeline.py").read_text(encoding="utf-8")
     report_source = (ROOT / "quality_report.py").read_text(encoding="utf-8")
-    env_source = (ROOT / ".env").read_text(encoding="utf-8")
+    # CI and production images intentionally exclude the secret-bearing .env.
+    env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert 'VISUAL_PLANNING_MODE", "hybrid"' in visual_source
     assert "RICH_VISUAL_PLANNER_PROMPT" in visual_source
     assert "repair_freeform_plan(raw_plan)" in visual_source

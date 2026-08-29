@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 BASE_DIR = Path(__file__).resolve().parent
-LOGS_DIR = BASE_DIR / "logs" / "runs"
+LOGS_DIR = Path(os.environ.get("RUN_LOGS_DIR", BASE_DIR / "logs" / "runs"))
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 _lock = threading.Lock()

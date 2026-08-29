@@ -25,7 +25,8 @@ def test_private_job_asset_and_log_routes_require_authentication(monkeypatch):
     ]
     for path in paths:
         response = client.get(path)
-        assert response.status_code == 401, path
+        expected = 404 if path.startswith("/stream/") and not app_module.ENABLE_STREAMING else 401
+        assert response.status_code == expected, path
 
 
 def test_private_job_routes_hide_resources_owned_by_someone_else(monkeypatch):
