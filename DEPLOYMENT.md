@@ -224,6 +224,9 @@ Never test a restore by overwriting the live production project.
    change plus forced sign-in, quota reservation, one render, playback, and
    logout. Test account deletion only with a dedicated disposable user and
    verify its private Storage prefixes were removed.
+5. Before paid beta or general-public release, complete every release gate in
+   `LEGAL_REVIEW.md`, including professional review and an end-to-end delivery
+   test for `support@explainora.dev`.
 
 Application rollback means redeploying the preceding immutable SHA. Database
 rollbacks must be forward migrations; do not delete an applied migration or

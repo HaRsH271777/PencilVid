@@ -11,6 +11,7 @@ import { Checkout } from './routes/Checkout'
 import { Home } from './routes/Home'
 import { Landing } from './routes/Landing'
 import { Library } from './routes/Library'
+import { PrivacyPolicy, RefundPolicy, Support, TermsOfService } from './routes/Legal'
 import { Plans } from './routes/Plans'
 import { Production } from './routes/Production'
 import { VideoDetail } from './routes/VideoDetail'
@@ -85,6 +86,13 @@ function AppRoutes() {
       <Route path="/auth/forgot" element={<ForgotPassword />} />
       <Route path="/auth/recovery" element={<ResetPassword />} />
       <Route path="/checkout" element={<Checkout />} />
+      <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/terms" element={<TermsOfService />} />
+      <Route path="/refunds" element={<RefundPolicy />} />
+      <Route path="/support" element={<Support />} />
+      <Route path="/privacy-policy" element={<Navigate replace to="/privacy" />} />
+      <Route path="/terms-of-service" element={<Navigate replace to="/terms" />} />
+      <Route path="/refund-policy" element={<Navigate replace to="/refunds" />} />
       <Route path="/app" element={<RequireAuth><StudioLayout /></RequireAuth>}>
         <Route index element={<Home />} />
         <Route path="account" element={<Account />} />

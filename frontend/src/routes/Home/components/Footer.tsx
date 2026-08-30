@@ -35,24 +35,24 @@ export function Footer() {
         <div className={styles['foot-cols']}>
           <div>
             <h5>Product</h5>
-            <Link to="/app">New video</Link><Link to="/app/videos">My videos</Link><a href="#pricing">Pricing</a>
+            <Link to="/app">New video</Link><Link to="/app/videos">My videos</Link><Link to="/app/plans">Plans</Link>
           </div>
           <div>
             <h5>Examples</h5>
             <Link to="/app/videos">Ocean currents</Link><Link to="/app/videos">How GPS works</Link><Link to="/app/videos">Lexing &amp; parsing</Link>
           </div>
           <div>
-            <h5>Company</h5>
-            <a href="#about">About</a><a href="#contact">Contact</a><a href="#careers">Careers</a>
+            <h5>Help</h5>
+            <Link to="/support">Support</Link><a href="mailto:support@explainora.dev">Email us</a><Link to="/app/account">My account</Link>
           </div>
           <div>
-            <h5>Resources</h5>
-            <a href="#docs">Docs</a><a href="#changelog">Changelog</a><a href="#status"><span className={styles['status-dot']} />Status</a>
+            <h5>Legal</h5>
+            <Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/refunds">Refunds</Link>
           </div>
         </div>
         <div className={styles['foot-legal']}>
           <span>© 2026 Simi Studio</span>
-          <span>Privacy · Terms</span>
+          <span><Link to="/privacy">Privacy</Link> · <Link to="/terms">Terms</Link> · <Link to="/refunds">Refunds</Link></span>
           <span><span className={styles['status-dot']} />All systems operational</span>
         </div>
         <div

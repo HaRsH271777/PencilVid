@@ -94,7 +94,7 @@ export function Auth() {
             {signingUp && <label><span>Confirm password</span><input autoComplete="new-password" minLength={8} name="confirmPassword" placeholder="Repeat your password" required type={showPassword ? 'text' : 'password'} /></label>}
 
             <div className={styles.options}>
-              <label className={styles.check}><input required={signingUp} type="checkbox" /><span>{signingUp ? 'I agree to the Terms and Privacy Policy' : 'Keep me signed in'}</span></label>
+              <label className={styles.check}><input required={signingUp} type="checkbox" /><span>{signingUp ? <>I agree to the <Link rel="noreferrer" target="_blank" to="/terms">Terms</Link> and <Link rel="noreferrer" target="_blank" to="/privacy">Privacy Policy</Link></> : 'Keep me signed in'}</span></label>
               {!signingUp && <Link to="/auth/forgot">Forgot password?</Link>}
             </div>
             {notice && <p className={styles.success} role="status">{notice}</p>}
