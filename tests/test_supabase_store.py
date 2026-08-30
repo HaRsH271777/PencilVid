@@ -228,6 +228,64 @@ def test_create_job_fails_closed_when_quota_rpc_is_unavailable():
     assert "quota" in result["error"].lower()
 
 
+def test_cancel_job_uses_owned_atomic_rpc():
+    store = SupabaseStore()
+    store.enabled = True
+
+    class Response:
+        data = {"outcome": "canceled", "status": "canceled"}
+
+    class Call:
+        @staticmethod
+        def execute():
+            return Response()
+
+    class Client:
+        @staticmethod
+        def rpc(name, params):
+            assert name == "cancel_video_job"
+            assert params == {"p_user_id": "user-id", "p_job_id": "abcdef123456"}
+            return Call()
+
+    store.client = Client()
+    assert store.cancel_job("user-id", "abcdef123456") == {
+        "outcome": "canceled", "status": "canceled",
+    }
+
+
+def test_worker_can_read_authoritative_cancellation_state():
+    store = SupabaseStore()
+    store.enabled = True
+
+    class Response:
+        data = {"status": "canceled"}
+
+    class Query:
+        def select(self, columns):
+            assert columns == "status"
+            return self
+
+        def eq(self, column, value):
+            assert (column, value) == ("id", "abcdef123456")
+            return self
+
+        def maybe_single(self):
+            return self
+
+        @staticmethod
+        def execute():
+            return Response()
+
+    class Client:
+        @staticmethod
+        def table(name):
+            assert name == "video_jobs"
+            return Query()
+
+    store.client = Client()
+    assert store.is_job_canceled("abcdef123456") is True
+
+
 def test_owned_job_ids_fetches_user_jobs_in_one_query(monkeypatch):
     store = SupabaseStore()
     store.enabled = True

@@ -114,6 +114,7 @@ function normalizeAudience(value?: string): Audience {
 function normalizeJobStatus(value?: string): JobStatus {
   if (value === 'completed' || value === 'done') return 'done'
   if (value === 'failed' || value === 'error') return 'error'
+  if (value === 'canceled' || value === 'cancelled') return 'canceled'
   if (value === 'running') return 'running'
   return 'queued'
 }
@@ -188,6 +189,13 @@ export async function getJob(id: string): Promise<Job> {
   return normalizeJob(raw, id)
 }
 
+export function cancelGeneration(id: string) {
+  return apiRequest<{ job_id: string; status: 'canceled' }>(
+    `/jobs/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
+}
+
 export function subscribeJob(
   id: string,
   onUpdate: (job: Job) => void,
@@ -206,7 +214,7 @@ export function subscribeJob(
       if (stopped) return
       const job = normalizeJob(raw, id)
       onUpdate(job)
-      if (job.status === 'done' || job.status === 'error') return
+      if (job.status === 'done' || job.status === 'error' || job.status === 'canceled') return
     } catch (error) {
       if (stopped || (error instanceof DOMException && error.name === 'AbortError')) return
       onError?.(error)

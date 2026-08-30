@@ -25,6 +25,8 @@ from app import (
     DOC_UPLOAD_DIR,
     ENABLE_STREAMING,
     _extract_document_text,
+    _clear_job_cancellation,
+    _request_job_cancellation,
     _run_streaming_video_job,
     _run_video_job,
     _set_job,
@@ -73,8 +75,8 @@ def _touch_health(status: str, job_id: str | None = None) -> None:
             LOGGER.warning("worker_status_update_failed", extra={"error_type": type(exc).__name__})
 
 
-def _heartbeat(job_id: str) -> None:
-    while not _stop.wait(HEARTBEAT_SECONDS):
+def _heartbeat(job_id: str, job_done: threading.Event) -> None:
+    while not job_done.wait(HEARTBEAT_SECONDS) and not _stop.is_set():
         try:
             _touch_health("busy", job_id)
             if not supabase_store.heartbeat_job(job_id, WORKER_ID):
@@ -82,6 +84,19 @@ def _heartbeat(job_id: str) -> None:
         except Exception:
             # A transient heartbeat failure should not destroy an otherwise
             # healthy render. Stale recovery remains the final safety net.
+            continue
+
+
+def _watch_cancellation(job_id: str, job_done: threading.Event) -> None:
+    """Bridge the durable canceled state into the active render process."""
+    while not job_done.wait(1.0) and not _stop.is_set():
+        try:
+            if supabase_store.is_job_canceled(job_id):
+                _request_job_cancellation(job_id)
+                return
+        except Exception:
+            # A transient read failure must not fail the render. The next poll
+            # retries, while the database has already released the user slot.
             continue
 
 
@@ -121,10 +136,16 @@ def run_once() -> bool:
     if not job:
         return False
     job_id = str(job["id"])
+    _clear_job_cancellation(job_id)
     _touch_health("busy", job_id)
     downloaded_path: Path | None = None
-    heartbeat = threading.Thread(target=_heartbeat, args=(job_id,), daemon=True)
+    job_done = threading.Event()
+    heartbeat = threading.Thread(target=_heartbeat, args=(job_id, job_done), daemon=True)
+    cancellation = threading.Thread(
+        target=_watch_cancellation, args=(job_id, job_done), daemon=True
+    )
     heartbeat.start()
+    cancellation.start()
     try:
         payload, downloaded_path = _hydrate_payload(job)
         _set_job(
@@ -154,6 +175,10 @@ def run_once() -> bool:
             error=str(exc),
         )
     finally:
+        job_done.set()
+        heartbeat.join(timeout=1)
+        cancellation.join(timeout=1)
+        _clear_job_cancellation(job_id)
         if downloaded_path:
             downloaded_path.unlink(missing_ok=True)
         _touch_health("idle")

@@ -1,5 +1,5 @@
 export type Audience = 'beginner' | 'intermediate' | 'developer'
-export type JobStatus = 'queued' | 'running' | 'done' | 'error'
+export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'canceled'
 export type SceneStatus = 'pending' | 'active' | 'done'
 
 export interface Scene {

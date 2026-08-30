@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { startGeneration } from '../../lib/api'
+import { cancelGeneration, startGeneration } from '../../lib/api'
 import type { Audience, GenerationInput, Job, Scene } from '../../lib/types'
 import { useProduction } from '../../hooks/useProduction'
 import { PencilLoader } from '../../components/ui/PencilLoader'
@@ -75,6 +75,7 @@ export function Production() {
   const [requestError, setRequestError] = useState('')
   const [retrying, setRetrying] = useState(false)
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [canceling, setCanceling] = useState(false)
   const cancelTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -94,10 +95,24 @@ export function Production() {
     if (cancelTimer.current !== null) window.clearTimeout(cancelTimer.current)
   }, [])
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
+    if (canceling) return
     if (confirmCancel) {
       setConfirmCancel(false)
-      navigate('/app')
+      setCanceling(true)
+      setRequestError('')
+      try {
+        await cancelGeneration(jobId)
+        trackJob(null)
+        if (sessionStorage.getItem('simi_last_job_id') === jobId) {
+          sessionStorage.removeItem('simi_last_job_id')
+        }
+        sessionStorage.removeItem('simi_generation_input')
+        navigate('/app', { replace: true })
+      } catch (error) {
+        setRequestError(error instanceof Error ? error.message : 'Could not cancel generation.')
+        setCanceling(false)
+      }
       return
     }
     setConfirmCancel(true)
@@ -235,7 +250,7 @@ export function Production() {
               })}
             </div>
             <span className={`mono ${styles.pct}`}>{displayPercent}%</span>
-            <Button className={`${styles['btn-ghost']} ${confirmCancel ? styles['cancel-confirm'] : ''}`} onClick={handleCancel} variant="ghost">{confirmCancel ? 'Click again to cancel' : 'Cancel'}</Button>
+            <Button className={`${styles['btn-ghost']} ${confirmCancel ? styles['cancel-confirm'] : ''}`} disabled={canceling} onClick={() => void handleCancel()} variant="ghost">{canceling ? 'Canceling…' : confirmCancel ? 'Click again to cancel' : 'Cancel'}</Button>
             <Button className={`${styles['btn-ghost']} ${styles.notify}`} variant="ghost">🔔 Notify me</Button>
           </div>
           <div className={styles['safe-note']}>

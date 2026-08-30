@@ -239,6 +239,41 @@ socketio = SocketIO(
 
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
+_job_cancel_events: Dict[str, threading.Event] = {}
+_job_cancel_lock = threading.Lock()
+
+
+class JobCanceled(RuntimeError):
+    """Raised cooperatively when a user cancels an active render."""
+
+
+def _request_job_cancellation(job_id: str) -> None:
+    with _job_cancel_lock:
+        _job_cancel_events.setdefault(job_id, threading.Event()).set()
+
+
+def _clear_job_cancellation(job_id: str) -> None:
+    with _job_cancel_lock:
+        _job_cancel_events.pop(job_id, None)
+
+
+def _raise_if_job_canceled(job_id: str) -> None:
+    with _job_cancel_lock:
+        canceled = bool(
+            job_id in _job_cancel_events and _job_cancel_events[job_id].is_set()
+        )
+    if canceled:
+        raise JobCanceled("Video generation was canceled")
+
+
+def _set_local_job_canceled(job_id: str) -> None:
+    with _jobs_lock:
+        _jobs.setdefault(job_id, {}).update({
+            "status": "canceled",
+            "stage": "canceled",
+            "detail": "Canceled by user",
+            "error": None,
+        })
 
 # Streaming-mode bookkeeping (segments queue + per-job plan cache).
 _segment_state: Dict[str, Dict[str, Any]] = {}
@@ -627,9 +662,13 @@ def _generate_tts_pass(
     scenes = plan["scenes"]
 
     def worker(scene):
+        if job_id:
+            _raise_if_job_canceled(job_id)
         scene_id = int(scene["id"])
         wav = pass_dir / f"scene_{scene_id:03d}.wav"
         synthesize(scene["narration"], wav, job_id=job_id)
+        if job_id:
+            _raise_if_job_canceled(job_id)
         return wav, audio_duration_seconds(wav)
 
     pairs = _parallel_map(scenes, worker, workers=min(MAX_WORKERS, 4))
@@ -705,6 +744,7 @@ def _generate_visual_assets(
     def build_scene(scene):
         nonlocal completed
 
+        _raise_if_job_canceled(job_id)
         scene_id = int(scene["id"])
         _update_job_scene(job_id, scene_id - 1, status="active")
 
@@ -737,6 +777,7 @@ def _generate_visual_assets(
                 semantic_constraints=scene.get("semantic_contract"),
                 scene_id=scene_id,
             )
+            _raise_if_job_canceled(job_id)
 
         except Exception as error:
             # This theoretically should almost never be
@@ -1015,6 +1056,7 @@ def _render_scene_segments(job_id: str, visual_assets, audio_files, durations, j
 
     def render_item(item):
         nonlocal completed
+        _raise_if_job_canceled(job_id)
         visual, audio_path, duration = item
         scene_id = int(visual["scene_id"])
         output = video_dir / f"scene_{scene_id:03d}.mp4"
@@ -1166,6 +1208,7 @@ def _run_video_job(job_id: str, payload: Dict[str, Any]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        _raise_if_job_canceled(job_id)
         from run_log import get_summary, log_stage_ts
         log_stage_ts(job_id, "started", "batch video generation")
         prompt = str(payload["prompt"]).strip()
@@ -1193,12 +1236,14 @@ def _run_video_job(job_id: str, payload: Dict[str, Any]) -> None:
         )
         _set_job(job_id, status="running", stage="planning", progress=5, detail="Locking topic scope and writing the complete explanation")
         plan = create_video_plan(prompt, target_seconds, audience, job_id=job_id)
+        _raise_if_job_canceled(job_id)
         _set_job_plan(job_id, plan)
 
         _set_job(job_id, stage="tts", progress=16, detail="Generating local narration and measuring real speech duration")
         plan, audio_files, durations, duration_history = _fit_narration_duration(
             job_id, plan, target_seconds, job_dir
         )
+        _raise_if_job_canceled(job_id)
         for scene in plan.get("scenes", []):
             record_text_sample(
                 str(scene.get("narration", "")),
@@ -1209,16 +1254,19 @@ def _run_video_job(job_id: str, payload: Dict[str, Any]) -> None:
 
         _set_job(job_id, stage="visuals", progress=52, detail="Generating SVG scenes in parallel")
         visual_assets = _generate_visual_assets(job_id, plan, job_dir, sketch, runtime=runtime)
+        _raise_if_job_canceled(job_id)
 
         _set_job(job_id, stage="encoding", progress=79, detail="Combining each scene with its narration")
         scene_videos = _render_scene_segments(
             job_id, visual_assets, audio_files, durations, job_dir,
             plan=plan, captions=captions, runtime=runtime,
         )
+        _raise_if_job_canceled(job_id)
 
         _set_job(job_id, stage="finalizing", progress=95, detail="Concatenating scene videos")
         final_mp4 = output_dir / "final.mp4"
         concat_scene_videos(scene_videos, final_mp4)
+        _raise_if_job_canceled(job_id)
         final_duration = audio_duration_seconds(final_mp4)
         log_stage_ts(job_id, "completed", "batch video generation completed")
         llm_usage = get_summary(job_id)
@@ -1288,7 +1336,9 @@ def _run_video_job(job_id: str, payload: Dict[str, Any]) -> None:
         manifest["evaluation_url"] = f"/outputs/{job_id}/{evaluation_path.name}"
         manifest_path = output_dir / "manifest.json"
         write_manifest(manifest_path, manifest)
+        _raise_if_job_canceled(job_id)
         supabase_store.complete_video(payload.get("user_id"), job_id, manifest)
+        _raise_if_job_canceled(job_id)
 
         _set_job(
             job_id,
@@ -1313,6 +1363,8 @@ def _run_video_job(job_id: str, payload: Dict[str, Any]) -> None:
             },
         )
 
+    except JobCanceled:
+        _set_local_job_canceled(job_id)
     except Exception as exc:
         evaluation = _write_preflight_failure_evaluation(job_id, output_dir, payload, exc)
         try:
@@ -1903,6 +1955,7 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
             state["segments"].append(seg_info)
 
     try:
+        _raise_if_job_canceled(job_id)
         from run_log import get_summary, log_stage_ts
         log_stage_ts(job_id, "started", "streaming video generation")
         target_seconds = float(payload["duration_seconds"])
@@ -1917,6 +1970,7 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
             job_id, payload, socketio=socketio, segment_cb=on_segment,
             source_text=source_text, full_source_text=full_source_text, style=style,
         )
+        _raise_if_job_canceled(job_id)
 
         # Copy the assembled final.mp4 into the outputs dir for the legacy
         # player and download links (manifest included for batch mode parity).
@@ -1982,7 +2036,9 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
         manifest_path.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        _raise_if_job_canceled(job_id)
         supabase_store.complete_video(payload.get("user_id"), job_id, manifest)
+        _raise_if_job_canceled(job_id)
 
         _set_job(
             job_id,
@@ -2027,6 +2083,8 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
                 to=f"job:{job_id}",
             )
 
+    except JobCanceled:
+        _set_local_job_canceled(job_id)
     except Exception as exc:
         evaluation = _write_preflight_failure_evaluation(job_id, output_dir, payload, exc)
         try:
@@ -2058,7 +2116,46 @@ def _run_streaming_video_job(job_id: str, payload: Dict[str, Any]) -> None:
             pass
 
 
-@app.route("/api/jobs/<job_id>")
+@app.route("/api/jobs/<job_id>", methods=["DELETE"])
+def cancel_job(job_id: str):
+    if not re.fullmatch(r"[0-9a-f]{12}", job_id):
+        return jsonify({"error": "job not found"}), 404
+    user_id, denied = _authorized_job(job_id)
+    if denied:
+        return denied
+
+    if not supabase_store.enabled:
+        local_job = _get_job(job_id)
+        if not local_job:
+            return jsonify({"error": "job not found"}), 404
+        if local_job.get("status") not in {"queued", "running"}:
+            if local_job.get("status") == "canceled":
+                return jsonify({"job_id": job_id, "status": "canceled"})
+            return jsonify({"error": "This job can no longer be canceled"}), 409
+
+    try:
+        result = supabase_store.cancel_job(user_id, job_id)
+    except Exception as exc:
+        app.logger.error("Unable to cancel job %s: %s", job_id, type(exc).__name__)
+        return jsonify({"error": "Cancellation is temporarily unavailable"}), 503
+
+    outcome = str(result.get("outcome") or "")
+    if outcome == "not_found":
+        return jsonify({"error": "job not found"}), 404
+    if outcome == "not_cancelable":
+        return jsonify({
+            "error": "This job can no longer be canceled",
+            "status": result.get("status"),
+        }), 409
+    if outcome not in {"canceled", "already_canceled"}:
+        return jsonify({"error": "Cancellation is temporarily unavailable"}), 503
+
+    _request_job_cancellation(job_id)
+    _set_local_job_canceled(job_id)
+    return jsonify({"job_id": job_id, "status": "canceled"})
+
+
+@app.route("/api/jobs/<job_id>", methods=["GET"])
 def job_status(job_id: str):
     user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
     if auth_error:

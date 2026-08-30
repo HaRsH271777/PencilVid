@@ -328,7 +328,39 @@ class SupabaseStore:
         if row.get("status") in {"completed", "failed", "canceled"}:
             row["completed_at"] = _now()
         if row:
-            self._safe("update job", lambda: self.client.table("video_jobs").update(row).eq("id", job_id).execute())  # type: ignore[union-attr]
+            # Cancellation is terminal. A worker may finish an in-flight render
+            # after the user cancels, but it must never revive that database row.
+            self._safe(
+                "update job",
+                lambda: self.client.table("video_jobs").update(row).eq("id", job_id).neq(
+                    "status", "canceled"
+                ).execute(),  # type: ignore[union-attr]
+            )
+
+    def cancel_job(self, user_id: Optional[str], job_id: str) -> Dict[str, Any]:
+        """Atomically cancel an owned active job and release its quota slot."""
+        if not self.enabled:
+            return {"outcome": "canceled", "status": "canceled"}
+        if not user_id:
+            return {"outcome": "not_found"}
+        response = self.client.rpc("cancel_video_job", {  # type: ignore[union-attr]
+            "p_user_id": user_id,
+            "p_job_id": job_id,
+        }).execute()
+        data = response.data
+        if isinstance(data, list):
+            data = data[0] if data else None
+        return data if isinstance(data, dict) else {"outcome": "unavailable"}
+
+    def is_job_canceled(self, job_id: str) -> bool:
+        """Read the authoritative cancellation flag for a render worker."""
+        if not self.enabled:
+            return False
+        response = self.client.table("video_jobs").select("status").eq(  # type: ignore[union-attr]
+            "id", job_id
+        ).maybe_single().execute()
+        row = response.data if response else None
+        return bool(row and row.get("status") == "canceled")
 
     def replace_scenes(self, user_id: Optional[str], job_id: str, scenes: List[Dict[str, Any]]) -> None:
         if not user_id or not scenes:

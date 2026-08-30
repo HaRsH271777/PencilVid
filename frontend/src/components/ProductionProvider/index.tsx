@@ -29,7 +29,7 @@ export function ProductionProvider({ children }: { children: ReactNode }) {
       activeJobId,
       (nextJob) => {
         setJob(nextJob)
-        if (nextJob.status === 'done' || nextJob.status === 'error') {
+        if (nextJob.status === 'done' || nextJob.status === 'error' || nextJob.status === 'canceled') {
           sessionStorage.removeItem('simi_active_job_id')
           setActiveJobId(null)
         }
