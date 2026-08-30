@@ -53,17 +53,18 @@ To stop the stack:
 docker compose -f compose.production.yaml down
 ```
 
-## 2. Supabase environments
+## 2. Supabase environment
 
-Use three isolated projects/data sets:
+The initial deployment deliberately uses the existing hosted Supabase project
+for production and the Supabase CLI stack for local migration tests. There is
+no hosted staging database at the current scale. Releases therefore enable the
+application maintenance gate before applying forward-only migrations and turn
+it off only after the immutable web image passes readiness.
 
-- local development: Supabase CLI on the developer machine;
-- staging: a separate hosted project containing synthetic/test data only;
-- production: the hosted project containing real users and assets.
-
-Never copy production users or uploaded documents into staging. Configure the
-same Auth redirect rules and private buckets in each environment through the
-committed migrations.
+This is an accepted early-stage availability tradeoff, not full environment
+isolation. Create a separate staging project before the team grows, before a
+destructive data migration, or before production data makes manual recovery
+unacceptable. Never copy production users or source documents into staging.
 
 The existing project was initially migrated in the SQL Editor. Before the
 first CLI-managed release, compare the actual schema, then mark only the SQL
@@ -78,19 +79,19 @@ supabase migration repair --status applied 20260830000000
 supabase db push --dry-run
 ```
 
-The dry run should show only `20260831000000_production_operations.sql`. Run
-this procedure separately for the existing project and only after verifying
-the three earlier migrations really are installed. A fresh staging or
-production project needs no repair; `supabase db push` applies every migration.
+The dry run should show only `20260831000000_production_operations.sql`. Only
+repair migration history after verifying the three earlier migrations really
+are installed. A future fresh staging project needs no repair; `supabase db
+push` applies every migration.
 
 After baselining, all schema changes must be new committed migrations. Never
 edit the remote production schema directly in Table Editor or SQL Editor.
 
-## 3. GitHub environments and secrets
+## 3. GitHub environment and secrets
 
-In Repository Settings -> Environments, create `staging` and `production`.
-Protect `production` with a required reviewer and restrict it to `main`.
-Also protect `main` and require every `CI` job before merge.
+In Repository Settings -> Environments, create `production`. Protect it with a
+required reviewer and restrict it to `main`. Also protect `main` and require
+every `CI` job before merge.
 
 Add these secrets to each environment:
 
@@ -98,6 +99,8 @@ Add these secrets to each environment:
 |---|---|
 | `SUPABASE_ACCESS_TOKEN` | Supabase CLI personal access token |
 | `SUPABASE_DB_PASSWORD` | Database password for that environment |
+| `OCI_SSH_PRIVATE_KEY` | Dedicated Oracle VM deployment private key |
+| `OCI_KNOWN_HOSTS` | Verified SSH host-key line for the Oracle VM |
 
 Add these non-secret environment variables:
 
@@ -108,17 +111,23 @@ Add these non-secret environment variables:
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Public browser key embedded in the frontend |
 | `VITE_PUBLIC_DEMO_URL` | Optional public 30-second demo clip |
 | `VITE_PUBLIC_DEMO_POSTER_URL` | Optional public demo poster |
+| `OCI_HOST` | Reserved Oracle VM public IP or admin hostname |
+| `OCI_USER` | Oracle Ubuntu SSH user, normally `ubuntu` |
+| `APP_DOMAIN` | Public hostname without a URL scheme |
 
-The `Release` workflow is manual and approval-gated. It performs a database
-dry run, applies pending migrations, and publishes an environment-tagged image
-plus an immutable commit-SHA image to GitHub Container Registry. It never
-places runtime secrets inside the image.
+The `Release` workflow is manual and approval-gated. It publishes AMD64 and
+ARM64 images, enables maintenance, performs a database dry run, applies pending
+migrations, and deploys the immutable commit-SHA image to Oracle. It never
+places runtime secrets inside the image. See
+[`deploy/oracle/README.md`](deploy/oracle/README.md) for initial VM and
+Cloudflare setup.
 
-## 4. Hosting-provider runtime secrets
+## 4. Oracle runtime secrets
 
-Create one web service and at least one worker service from the same image.
-Use the image SHA tag, not `latest`. Give both services the same backend
-secrets, but expose a public port only for web.
+The selected Oracle Ampere A1 deployment runs one web service and one worker
+from the same SHA-tagged image. Caddy is the only service exposing public ports;
+port 5000 remains on a private Docker network. The worker is intentionally
+single-job-at-a-time for the 2-OCPU Always Free allowance.
 
 Required runtime secrets:
 
@@ -175,14 +184,17 @@ Minimum alerts:
 - LLM provider error or rate-limit spikes.
 
 Do not expose raw prompts, uploaded document contents, access tokens, or
-provider keys in logs. Test alerts in staging before production launch.
+provider keys in logs. Rehearse alerts locally and perform a controlled
+maintenance-window test before production launch.
 
 ## 6. Backups and restore drills
 
-For production, enable Supabase managed daily backups at minimum. If losing up
-to one day of user/job data is unacceptable, enable Point-in-Time Recovery.
-Storage objects need their own recovery/export policy; database backups do not
-constitute an application-level restore test.
+If the existing project is on Supabase Free, managed downloadable backups are
+not guaranteed. Schedule a weekly logical database dump and a separate export
+of the private Storage bucket to off-server storage before accepting real user
+data. On Supabase Pro or above, enable managed daily backups at minimum; if
+losing up to one day is unacceptable, enable Point-in-Time Recovery. Database
+backups do not include Storage objects.
 
 Quarterly restore drill:
 
@@ -198,10 +210,10 @@ Never test a restore by overwriting the live production project.
 ## 7. Release and rollback
 
 1. Merge only after the `CI` workflow passes.
-2. Run `Release` for staging and complete an authenticated generate/playback test.
-3. Run `Release` for production and approve its protected environment.
-4. Deploy the exact GHCR SHA to web, then workers.
-5. Verify `/readyz`, sign-in, quota reservation, one render, playback, and logout.
+2. Approve and run `Release` for the protected production environment.
+3. The workflow enables maintenance, applies migrations, and deploys the exact
+   GHCR SHA to Oracle.
+4. Verify `/readyz`, sign-in, quota reservation, one render, playback, and logout.
 
 Application rollback means redeploying the preceding immutable SHA. Database
 rollbacks must be forward migrations; do not delete an applied migration or

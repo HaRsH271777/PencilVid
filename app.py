@@ -166,6 +166,9 @@ install_request_logging(app)
 
 APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
+MAINTENANCE_MODE = os.environ.get("MAINTENANCE_MODE", "0").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 MAX_UPLOAD_BYTES = max(1, int(os.environ.get("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))))
 MAX_PROMPT_CHARS = max(100, int(os.environ.get("MAX_PROMPT_CHARS", "4000")))
 MAX_VIDEO_DURATION_SECONDS = max(20, int(os.environ.get("MAX_VIDEO_DURATION_SECONDS", "1800")))
@@ -196,6 +199,30 @@ if IS_PRODUCTION and len(_media_signing_key) < 32:
     raise RuntimeError("MEDIA_SIGNING_KEY must contain at least 32 characters in production")
 if not _media_signing_key:
     _media_signing_key = uuid.uuid4().hex.encode("ascii")
+
+
+@app.before_request
+def maintenance_gate():
+    """Stop user traffic while preserving operational health endpoints."""
+    if not MAINTENANCE_MODE or request.path in {"/healthz", "/readyz"}:
+        return None
+
+    wants_json = (
+        request.path.startswith(("/api/", "/media/", "/outputs/", "/segments/"))
+        or request.is_json
+        or request.accept_mimetypes.best == "application/json"
+    )
+    if wants_json:
+        response = jsonify({
+            "error": "maintenance",
+            "message": "PencilVid is temporarily unavailable while an update is applied.",
+        })
+    else:
+        response = Response(render_template("maintenance.html"), mimetype="text/html")
+    response.status_code = 503
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Retry-After"] = "300"
+    return response
 
 socketio = SocketIO(
     app,
@@ -304,6 +331,14 @@ def health_check():
 @app.route("/readyz")
 def readiness_check():
     """Readiness: required database, storage, and render tools are usable."""
+    if MAINTENANCE_MODE:
+        return jsonify({
+            "status": "maintenance",
+            "service": "pencilvid-web",
+            "version": os.environ.get("APP_VERSION", "development"),
+            "checks": {"maintenance_mode": {"ok": False, "detail": "enabled"}},
+        }), 503
+
     from runtime_health import check_readiness
 
     result = check_readiness(

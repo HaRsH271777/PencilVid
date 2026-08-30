@@ -22,6 +22,25 @@ def test_readiness_returns_503_when_dependency_is_not_ready(monkeypatch):
     assert response.get_json()["status"] == "not_ready"
 
 
+def test_maintenance_mode_blocks_user_traffic_but_keeps_health(monkeypatch):
+    monkeypatch.setattr(app_module, "MAINTENANCE_MODE", True)
+    client = app_module.app.test_client()
+
+    health = client.get("/healthz")
+    readiness = client.get("/readyz")
+    api = client.get("/api/videos", headers={"Accept": "application/json"})
+    page = client.get("/")
+
+    assert health.status_code == 200
+    assert readiness.status_code == 503
+    assert readiness.get_json()["status"] == "maintenance"
+    assert api.status_code == 503
+    assert api.get_json()["error"] == "maintenance"
+    assert page.status_code == 503
+    assert b"Sharpening" in page.data
+    assert page.headers["Retry-After"] == "300"
+
+
 def test_supabase_readiness_checks_database_and_private_storage(monkeypatch):
     store = SupabaseStore()
     store.enabled = True
