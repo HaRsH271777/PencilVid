@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Simi Studio — Redesign Mockups</title>
+<title>Explainora — Redesign Mockups</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 /* ============================================================
-   TOKENS — palette is EXACTLY the measured Simi Studio palette.
+   TOKENS — palette is EXACTLY the measured Explainora palette.
    Only elevation / motion / spacing / radii are new, and every
    new value is derived from --text (#151515) or --accent (#315fda).
    ============================================================ */
@@ -523,7 +523,7 @@ body.ann .pin{display:grid}
 <!-- ============================= HEADER ============================= -->
 <header class="topbar" id="topbar">
   <div class="shell topbar-in">
-    <a class="brand" href="#" id="brand"><span class="brand-mark" id="bmark">S</span><span>SIMI STUDIO</span></a>
+    <a class="brand" href="#" id="brand"><span class="brand-mark" id="bmark">E</span><span>EXPLAINORA</span></a>
     <span class="job-pill" id="jobPill"><span class="mini-ring" id="miniRing"></span><span class="mono" id="jobTxt">Ground effect · 64%</span></span>
     <nav class="nav" id="nav">
       <span class="nav-pill" id="navPill"></span>
@@ -692,8 +692,8 @@ body.ann .pin{display:grid}
         <div><h5>Company</h5><a href="#">About</a><a href="#">Contact</a><a href="#">Careers</a></div>
         <div><h5>Resources</h5><a href="#">Docs</a><a href="#">Changelog</a><a href="#"><span class="status-dot"></span>Status</a></div>
       </div>
-      <div class="foot-legal"><span>© 2026 Simi Studio</span><span>Privacy · Terms</span><span><span class="status-dot"></span>All systems operational</span></div>
-      <div class="wordmark reveal" id="wm">SIMI STUDIO</div>
+      <div class="foot-legal"><span>© 2026 Explainora</span><span>Privacy · Terms</span><span><span class="status-dot"></span>All systems operational</span></div>
+      <div class="wordmark reveal" id="wm">EXPLAINORA</div>
     </div>
   </footer>
 </section>
@@ -745,7 +745,7 @@ body.ann .pin{display:grid}
       </div>
       <div class="safe-note">
         <span class="status-dot"></span> Your video is saved automatically — you can leave this page. Most videos finish in about 6 minutes.
-        <span style="margin-left:auto;font-family:var(--mono)">tab title: “<span id="tabSim">3% · Simi Studio</span>”</span>
+        <span style="margin-left:auto;font-family:var(--mono)">tab title: “<span id="tabSim">3% · Explainora</span>”</span>
       </div>
     </div>
   </div>
@@ -1118,7 +1118,7 @@ function renderProd(){
   document.getElementById('ring').style.setProperty('--p',pct);
   document.getElementById('ringTxt').textContent=pct+'%';
   document.getElementById('pctTxt').textContent=pct+'%';
-  document.getElementById('tabSim').textContent=pct+'% · Simi Studio';
+  document.getElementById('tabSim').textContent=pct+'% · Explainora';
   const secs=prodT*2.7|0;
   document.getElementById('elapsed').textContent=`${(secs/60|0)}:${String(secs%60).padStart(2,'0')} elapsed`;
   document.getElementById('jobTxt').textContent=`${SCENES[scene][0]} · ${pct}%`;

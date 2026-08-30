@@ -51,7 +51,7 @@ export function Footer() {
           </div>
         </div>
         <div className={styles['foot-legal']}>
-          <span>© 2026 Simi Studio</span>
+          <span>© 2026 Explainora</span>
           <span><Link to="/privacy">Privacy</Link> · <Link to="/terms">Terms</Link> · <Link to="/refunds">Refunds</Link></span>
           <span><span className={styles['status-dot']} />All systems operational</span>
         </div>
@@ -60,7 +60,7 @@ export function Footer() {
           ref={wordmark.ref}
           style={{ transitionDelay: '180ms' }}
         >
-          SIMI STUDIO
+          EXPLAINORA
         </div>
       </div>
     </footer>

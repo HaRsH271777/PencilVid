@@ -1,4 +1,4 @@
-# Running PencilVid / Simi Studio
+# Running PencilVid / Explainora
 
 This guide starts the current React frontend, Flask video-generation backend,
 and Supabase authentication/database integration.

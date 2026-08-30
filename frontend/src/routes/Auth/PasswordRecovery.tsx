@@ -13,7 +13,7 @@ function RecoveryShell({ children }: { children: React.ReactNode }) {
   return <main className={styles.page}>
     <div className={styles.grid} aria-hidden="true" />
     <header className={styles.header}>
-      <Link className={styles.brand} to="/"><span>S</span><strong>SIMI STUDIO</strong></Link>
+      <Link className={styles.brand} to="/"><span>E</span><strong>EXPLAINORA</strong></Link>
       <Link className={styles.back} to="/auth">← Back to sign in</Link>
     </header>
     <div className={`shell ${styles.recoveryLayout}`}>{children}</div>

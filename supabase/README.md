@@ -1,4 +1,4 @@
-# Supabase setup for Simi Studio
+# Supabase setup for Explainora
 
 The repository is ready to run without Supabase credentials (local demo mode),
 and automatically switches to Supabase Auth and persistence when credentials
@@ -27,7 +27,7 @@ prevents concurrent requests from crossing the plan limit, avoids double
 counting completed videos, and refunds failed or cancelled renders.
 
 Supabase Auth owns email/password identities. Passwords are hashed and managed
-inside `auth.users`; Simi never stores plaintext passwords or copies password
+inside `auth.users`; Explainora never stores plaintext passwords or copies password
 hashes into `public` tables.
 
 ## 2. Add browser credentials

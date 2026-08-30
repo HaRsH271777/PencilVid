@@ -42,7 +42,7 @@ export function Checkout() {
     <main className={`${styles.page} ${styles[details.color]}`}>
       <div aria-hidden="true" className={styles.grid} />
       <header className={styles.header}>
-        <Link className={styles.brand} to="/app/plans"><span>S</span><strong>SIMI PAY</strong></Link>
+        <Link className={styles.brand} to="/app/plans"><span>E</span><strong>EXPLAINORA PAY</strong></Link>
         <span>SECURE CHECKOUT</span>
       </header>
 
@@ -61,7 +61,7 @@ export function Checkout() {
         </section>
 
         <section className={styles.paymentCard} aria-labelledby="payment-title">
-          <div className={styles.cardHead}><span>PAYMENT PROVIDER</span><h2 id="payment-title">Continue securely</h2><p>Card information will be collected only by the configured payment provider. Simi Studio never receives raw card details.</p></div>
+          <div className={styles.cardHead}><span>PAYMENT PROVIDER</span><h2 id="payment-title">Continue securely</h2><p>Card information will be collected only by the configured payment provider. Explainora never receives raw card details.</p></div>
           <div className={styles.form}>
             <div className={styles.demoNotice}><b>PROTECTED</b><span>Your plan changes only after a signed payment confirmation.</span></div>
             {error && <div aria-live="polite" className={styles.demoNotice} role="alert"><b>NOT READY</b><span>{error}</span></div>}

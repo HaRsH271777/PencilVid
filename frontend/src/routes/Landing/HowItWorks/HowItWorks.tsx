@@ -48,7 +48,7 @@ export function HowItWorks() {
         <div className={styles.sectionHead}>
           <div className="eyebrow">How it works</div>
           <h2>From a question to a finished explanation</h2>
-          <p>You bring the curiosity. Simi plans the story, draws the visuals, and turns it into something worth watching.</p>
+          <p>You bring the curiosity. Explainora plans the story, draws the visuals, and turns it into something worth watching.</p>
         </div>
         <div className={`${styles.paperStage} ${styles.reveal} ${reveal.className}`} onPointerMove={tiltPaper} onPointerLeave={(event) => { event.currentTarget.style.removeProperty('--paper-rx'); event.currentTarget.style.removeProperty('--paper-ry') }} ref={reveal.ref} style={{ '--connector': (activeStep + 1) / 3 } as PaperStyle}>
           <Paper className={styles.stepsPaper} tape>
@@ -66,7 +66,7 @@ export function HowItWorks() {
               <article data-active={activeStep === 1} data-step="1">
                 <span className={`hand ${styles.stepNumber}`}>02</span>
                 <h3>We sketch the scenes</h3>
-                <p>Simi finds the clearest sequence and writes narration for every visual beat.</p>
+                <p>Explainora finds the clearest sequence and writes narration for every visual beat.</p>
                 <div className={styles.sketch}>
                   <svg viewBox="0 0 220 94" aria-hidden="true"><rect x="15" y="25" width="48" height="42" rx="7"/><rect x="86" y="25" width="48" height="42" rx="7"/><rect x="157" y="25" width="48" height="42" rx="7"/><path d="M63 46h17m54 0h17M74 41l6 5-6 5m71-10 6 5-6 5"/></svg>
                 </div>

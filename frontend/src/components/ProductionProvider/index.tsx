@@ -44,8 +44,8 @@ export function ProductionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.title = generating
-      ? `${Math.max(3, job?.percent ?? 0)}% · Simi Studio`
-      : 'Simi Studio — Ideas, made visible'
+      ? `${Math.max(3, job?.percent ?? 0)}% · Explainora`
+      : 'Explainora — Ideas, made visible'
   }, [generating, job?.percent])
 
   const value = useMemo<ProductionContextValue>(() => ({

@@ -241,7 +241,7 @@ export function Production() {
           <div className={styles['safe-note']}>
             <span className={styles['status-dot']} />
             <span>Your video is saved automatically — you can leave this page. Most videos finish in about 6 minutes.</span>
-            <span className={styles['tab-title']}>tab title: “{displayPercent}% · Simi Studio”</span>
+            <span className={styles['tab-title']}>tab title: “{displayPercent}% · Explainora”</span>
           </div>
         </div>
       </div>

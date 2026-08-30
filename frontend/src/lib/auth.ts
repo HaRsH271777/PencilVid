@@ -75,7 +75,7 @@ function subscribe(callback: () => void) {
 }
 
 async function userFromSupabase(user: User): Promise<AuthUser> {
-  const fallbackName = String(user.user_metadata.full_name || user.email?.split('@')[0] || 'Simi Creator')
+  const fallbackName = String(user.user_metadata.full_name || user.email?.split('@')[0] || 'Explainora Creator')
   if (!supabase) return { id: user.id, name: fallbackName, email: user.email || '', plan: 'Free', joinedAt: user.created_at }
   const { data } = await supabase.from('profiles').select('full_name, avatar_url, current_plan_id, created_at').eq('id', user.id).maybeSingle()
   return {
@@ -130,7 +130,7 @@ export function setAuthUser(user: AuthUser) {
 
 export async function signIn(email: string, password: string): Promise<AuthResult> {
   if (!supabase) {
-    const name = email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'Simi Creator'
+    const name = email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'Explainora Creator'
     const user = { name, email, plan: 'Free' as const, joinedAt: new Date().toISOString() }
     publishUser(user)
     return { user, needsEmailConfirmation: false }

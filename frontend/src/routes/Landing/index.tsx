@@ -22,7 +22,7 @@ export function Landing() {
         <Features />
         <LandingFooter />
       </main>
-      <ButtonLink arrow aria-label="Start explaining in Simi Studio" className={navStyles.mobileDock} to="/app" viewTransition>Start explaining</ButtonLink>
+      <ButtonLink arrow aria-label="Start explaining in Explainora" className={navStyles.mobileDock} to="/app" viewTransition>Start explaining</ButtonLink>
     </>
   )
 }

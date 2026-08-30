@@ -10,7 +10,7 @@ const FEATURES = [
   },
   {
     title: 'Any topic',
-    copy: 'From science and engineering to history and code, Simi shapes the format around whatever you ask.',
+    copy: 'From science and engineering to history and code, Explainora shapes the format around whatever you ask.',
     icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4z"/><path d="m18.5 14 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>,
   },
   {
@@ -35,7 +35,7 @@ export function Features() {
         <div className={`${styles.featuresGrid} ${styles.reveal} ${reveal.className}`} ref={reveal.ref}>
           {FEATURES.map((feature, index) => <FeatureCard feature={feature} index={index} key={feature.title} />)}
           <article className={`${styles.featureCard} ${styles.styleFeature}`} data-skin={skin} ref={styleSpotlight}>
-            <div><span className={styles.category}>Interactive</span><h3>Choose your visual voice</h3><p>Preview a coherent art direction before Simi renders the first scene.</p></div>
+            <div><span className={styles.category}>Interactive</span><h3>Choose your visual voice</h3><p>Preview a coherent art direction before Explainora renders the first scene.</p></div>
             <div className={styles.stylePreview} aria-live="polite"><i /><b /><span /></div>
             <div className={styles.skinSwitch} aria-label="Preview style"><button aria-pressed={skin === 'ocean'} onClick={() => setSkin('ocean')} type="button">Ocean</button><button aria-pressed={skin === 'forest'} onClick={() => setSkin('forest')} type="button">Forest</button><button aria-pressed={skin === 'sunset'} onClick={() => setSkin('sunset')} type="button">Sunset</button></div>
           </article>

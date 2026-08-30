@@ -82,9 +82,9 @@ export function LandingNav() {
   return (
     <header className={`${styles.nav} ${stuck ? styles.stuck : ''}`}>
       <div className={`shell ${styles.inner}`}>
-        <Link className={styles.brand} ref={brandRef} to="/" aria-label="Simi Studio home">
-          <span className={styles.mark}>S</span>
-          <span>SIMI STUDIO</span>
+        <Link className={styles.brand} ref={brandRef} to="/" aria-label="Explainora home">
+          <span className={styles.mark}>E</span>
+          <span>EXPLAINORA</span>
         </Link>
         <div className={styles.desktopNav}>
           <AnimatedSectionIndicator active={active} />

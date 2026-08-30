@@ -106,7 +106,7 @@ def get_llm_config(role: str) -> LLMConfig:
     headers: Dict[str, str] = {}
     if provider == "openrouter":
         referer = os.environ.get("OPENROUTER_HTTP_REFERER")
-        title = os.environ.get("OPENROUTER_APP_TITLE", "Simi MVP")
+        title = os.environ.get("OPENROUTER_APP_TITLE", "Explainora")
         if referer:
             headers["HTTP-Referer"] = referer
         if title:

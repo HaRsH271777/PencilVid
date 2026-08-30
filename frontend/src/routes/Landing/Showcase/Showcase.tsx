@@ -39,7 +39,7 @@ export function Showcase() {
         <div className={styles.sectionHead}>
           <div className="eyebrow">Notes to visual</div>
           <h2>Your rough notes, rendered clearly</h2>
-          <p>Bring the messy thinking. Simi turns it into a visual story with structure, narration, and polish.</p>
+          <p>Bring the messy thinking. Explainora turns it into a visual story with structure, narration, and polish.</p>
         </div>
         <div className={`${styles.showcaseGrid} ${styles.reveal} ${reveal.className}`} ref={reveal.ref} style={{ '--resolve': 0 } as CSSProperties}>
           <Paper className={styles.notesPaper} tape={false}>
@@ -51,7 +51,7 @@ export function Showcase() {
               <li><i />more grip, but also more drag</li>
             </ul>
           </Paper>
-          <div className={styles.renderArrow} aria-hidden="true"><b>→</b><span className="hand">Simi renders it</span></div>
+          <div className={styles.renderArrow} aria-hidden="true"><b>→</b><span className="hand">Explainora renders it</span></div>
           <article className={styles.renderedCard} ref={renderedSpotlight}>
             <div className={styles.renderedMedia}>
               <svg viewBox="0 0 360 210" aria-hidden="true">

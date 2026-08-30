@@ -79,7 +79,7 @@ export function Header({ jobActive, jobScene, jobProgress }: HeaderProps) {
       <div className={`shell ${styles['topbar-in']}`}>
         <Link className={styles.brand} to="/app">
           <span className={styles['brand-mark']} ref={brandMarkRef}>S</span>
-          <span>SIMI STUDIO</span>
+          <span>EXPLAINORA</span>
         </Link>
 
         <span className={jobPillClassName}>

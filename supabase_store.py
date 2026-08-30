@@ -1,4 +1,4 @@
-"""Optional Supabase persistence for Simi Studio.
+"""Optional Supabase persistence for Explainora.
 
 The app remains runnable without credentials. Once SUPABASE_URL and
 SUPABASE_SECRET_KEY are present, authenticated requests are required and all

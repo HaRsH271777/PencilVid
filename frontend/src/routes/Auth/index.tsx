@@ -35,7 +35,7 @@ export function Auth() {
       return
     }
     const enteredName = String(data.get('name') || '').trim()
-    const fallbackName = email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'Simi Creator'
+    const fallbackName = email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) || 'Explainora Creator'
     setError('')
     setSubmitting(true)
     try {
@@ -60,7 +60,7 @@ export function Auth() {
     <main className={styles.page}>
       <div className={styles.grid} aria-hidden="true" />
       <header className={styles.header}>
-        <Link className={styles.brand} to="/" aria-label="Simi Studio home"><span>S</span><strong>SIMI STUDIO</strong></Link>
+        <Link className={styles.brand} to="/" aria-label="Explainora home"><span>E</span><strong>EXPLAINORA</strong></Link>
         <Link className={styles.back} to="/">← Back to home</Link>
       </header>
 
@@ -83,7 +83,7 @@ export function Auth() {
           </div>
           <div className={styles.cardHead}>
             <span>SECURE STUDIO ACCESS</span>
-            <h2 id="auth-title">{signingUp ? 'Create your account' : 'Sign in to Simi'}</h2>
+            <h2 id="auth-title">{signingUp ? 'Create your account' : 'Sign in to Explainora'}</h2>
             <p>{signingUp ? 'One account. Every explanation.' : 'Continue creating clear visual stories.'}</p>
           </div>
 
@@ -102,7 +102,7 @@ export function Auth() {
             <button className={styles.submit} disabled={submitting} type="submit"><span>{submitting ? 'OPENING STUDIO…' : signingUp ? 'CREATE ACCOUNT' : 'SIGN IN'}</span><b aria-hidden="true">→</b></button>
           </form>
 
-          <p className={styles.switchCopy}>{signingUp ? 'Already have an account?' : 'New to Simi?'} <button onClick={() => switchMode(signingUp ? 'signin' : 'signup')} type="button">{signingUp ? 'Sign in' : 'Create an account'}</button></p>
+          <p className={styles.switchCopy}>{signingUp ? 'Already have an account?' : 'New to Explainora?'} <button onClick={() => switchMode(signingUp ? 'signin' : 'signup')} type="button">{signingUp ? 'Sign in' : 'Create an account'}</button></p>
         </section>
       </div>
     </main>

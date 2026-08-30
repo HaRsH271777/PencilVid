@@ -33,7 +33,7 @@ export function TrustStrip() {
   const clarity = useMetric(4.9, reveal.revealed, 1)
 
   return (
-    <section className={`${styles.strip} ${styles.reveal} ${reveal.className}`} ref={reveal.ref} aria-label="Simi Studio metrics">
+    <section className={`${styles.strip} ${styles.reveal} ${reveal.className}`} ref={reveal.ref} aria-label="Explainora metrics">
       <div className={`shell ${styles.stripInner}`}>
         <div className={styles.trustMain}>
           <p>Ideas made visible for curious minds, students, and teams</p>

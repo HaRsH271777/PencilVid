@@ -96,7 +96,7 @@ export function Plans() {
         <p>Pick the video allowance that fits your ideas. Prices are placeholders while billing is being connected.</p>
       </header>
 
-      {upgradedTo && <div className={styles.successBanner} role="status"><span>✓</span><div><strong>Upgrade complete</strong><p>Your payment was confirmed and {upgradedTo} is now active across Simi Studio.</p></div></div>}
+      {upgradedTo && <div className={styles.successBanner} role="status"><span>✓</span><div><strong>Upgrade complete</strong><p>Your payment was confirmed and {upgradedTo} is now active across Explainora.</p></div></div>}
 
       <div aria-label="Available plans" className={styles.plansGrid}>
         {plans.map((plan) => {

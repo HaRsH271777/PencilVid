@@ -33,13 +33,13 @@ export function LandingFooter() {
       <footer className={styles.footer}>
         <div className="shell">
           <div className={styles.footerGrid}>
-            <div className={styles.footerBrand}><Link to="/"><span>S</span><b>SIMI STUDIO</b></Link><p>Ideas, made visible.</p><div className={styles.socials}><Link to="/support" aria-label="Contact Simi Studio support">?</Link><a href="mailto:support@explainora.dev" aria-label="Email Simi Studio support">@</a></div></div>
+            <div className={styles.footerBrand}><Link to="/"><span>E</span><b>EXPLAINORA</b></Link><p>Ideas, made visible.</p><div className={styles.socials}><Link to="/support" aria-label="Contact Explainora support">?</Link><a href="mailto:support@explainora.dev" aria-label="Email Explainora support">@</a></div></div>
             <div><h3>Product</h3><Link to="/app">New video</Link><Link to="/app/videos">My videos</Link><a href="#features">Features</a></div>
             <div><h3>Explore</h3><a href="#how">How it works</a><a href="#examples">Examples</a><Link to="/app/videos">Video library</Link></div>
             <div><h3>Legal & help</h3><Link to="/support">Support</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/refunds">Refunds</Link></div>
           </div>
-          <div className={styles.legal}><span>© 2026 Simi Studio</span><span><Link to="/privacy">Privacy</Link> · <Link to="/terms">Terms</Link> · <Link to="/refunds">Refunds</Link></span><span><i />All systems operational</span></div>
-          <div className={`${styles.footerWordmark} ${styles.reveal} ${wordmark.className}`} ref={wordmark.ref}>SIMI STUDIO</div>
+          <div className={styles.legal}><span>© 2026 Explainora</span><span><Link to="/privacy">Privacy</Link> · <Link to="/terms">Terms</Link> · <Link to="/refunds">Refunds</Link></span><span><i />All systems operational</span></div>
+          <div className={`${styles.footerWordmark} ${styles.reveal} ${wordmark.className}`} ref={wordmark.ref}>EXPLAINORA</div>
         </div>
       </footer>
     </>
