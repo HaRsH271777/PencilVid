@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -10,6 +11,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useGhostType, useMagnetic } from '../../../hooks'
 import { useProduction } from '../../../hooks/useProduction'
 import { startGeneration } from '../../../lib/api'
+import { useAuthUser, type PlanName } from '../../../lib/auth'
 import { Button } from '../../../components/Button/Button'
 import type { Audience } from '../../../lib/types'
 import { SegmentedControl } from './SegmentedControl'
@@ -37,6 +39,18 @@ const DURATION_OPTIONS = [
   { label: '6 min', value: 6 },
 ] as const
 
+const PLAN_MAX_DURATION_MINUTES: Record<PlanName, 2 | 4 | 6> = {
+  Free: 2,
+  Pro: 4,
+  'Pro Ultra': 6,
+}
+
+const DURATION_UNLOCK_PLAN: Record<2 | 4 | 6, PlanName> = {
+  2: 'Free',
+  4: 'Pro',
+  6: 'Pro Ultra',
+}
+
 const AUDIENCE_OPTIONS = [
   { label: 'Beginner', value: 'beginner' },
   { label: 'Intermediate', value: 'intermediate' },
@@ -51,6 +65,7 @@ const FORECAST = {
 
 export function Composer() {
   const navigate = useNavigate()
+  const user = useAuthUser()
   const { trackJob } = useProduction()
   const [searchParams] = useSearchParams()
   const initialPrompt = searchParams.get('prompt')?.slice(0, 500) ?? ''
@@ -72,6 +87,22 @@ export function Composer() {
   const [starting, setStarting] = useState(false)
   const [sourceFile, setSourceFile] = useState<File | undefined>()
   const [error, setError] = useState('')
+  const maxDuration = PLAN_MAX_DURATION_MINUTES[user?.plan ?? 'Free']
+  const durationOptions = useMemo(() => DURATION_OPTIONS.map((option) => {
+    const disabled = option.value > maxDuration
+    return {
+      ...option,
+      disabled,
+      hint: disabled ? `Available on ${DURATION_UNLOCK_PLAN[option.value]}` : undefined,
+    }
+  }), [maxDuration])
+
+  useEffect(() => {
+    if (duration <= maxDuration) return
+    setDuration(2)
+    setForecast(FORECAST[2])
+    setForecastMorphing(false)
+  }, [duration, maxDuration])
 
   useEffect(() => () => {
     if (typingIntervalRef.current !== null) window.clearInterval(typingIntervalRef.current)
@@ -274,7 +305,7 @@ export function Composer() {
         <div className={styles.controls}>
           <div className={styles.ctl}>
             <label>Duration</label>
-            <SegmentedControl ariaLabel="Duration" options={DURATION_OPTIONS} value={duration} onChange={handleDurationChange} />
+            <SegmentedControl ariaLabel={`Duration. ${user?.plan ?? 'Free'} supports up to ${maxDuration} minutes`} options={durationOptions} value={duration} onChange={handleDurationChange} />
           </div>
           <div className={styles.ctl}>
             <label>Audience</label>

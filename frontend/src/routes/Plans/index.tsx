@@ -29,7 +29,7 @@ const plans: Plan[] = [
     reset: 'until plan reset',
     className: styles.free,
     stamp: 'Free',
-    features: ['5 videos until plan reset', 'Standard video quality', 'Personal video library', 'Shareable exports'],
+    features: ['Videos up to 2 minutes', '5 videos until plan reset', 'Standard video quality', 'Personal video library', 'Shareable exports'],
   },
   {
     name: 'Pro',
@@ -41,7 +41,7 @@ const plans: Plan[] = [
     reset: 'until token reset',
     className: styles.pro,
     stamp: 'Popular',
-    features: ['10 videos until token reset', 'High-quality exports', 'Priority generation', 'Everything in Free'],
+    features: ['Videos up to 4 minutes', '10 videos until token reset', 'High-quality exports', 'Priority generation', 'Everything in Free'],
   },
   {
     name: 'Pro Ultra',
@@ -53,7 +53,7 @@ const plans: Plan[] = [
     reset: 'until token reset',
     className: styles.ultra,
     stamp: 'Ultra',
-    features: ['20 videos until token reset', 'Premium video quality', 'Fastest render priority', 'Everything in Pro'],
+    features: ['Videos up to 6 minutes', '20 videos until token reset', 'Premium video quality', 'Fastest render priority', 'Everything in Pro'],
   },
 ]
 

@@ -4,6 +4,8 @@ import styles from '../Home.module.css'
 export interface SegmentOption<T extends string | number> {
   label: string
   value: T
+  disabled?: boolean
+  hint?: string
 }
 
 interface SegmentedControlProps<T extends string | number> {
@@ -53,14 +55,16 @@ export function SegmentedControl<T extends string | number>({
       <span className={styles.pill} style={pillStyle} />
       {options.map((option, index) => (
         <button
+          aria-label={option.hint ? `${option.label}. ${option.hint}` : option.label}
           aria-selected={option.value === value}
+          disabled={option.disabled}
           key={option.value}
           onClick={() => onChange(option.value)}
           ref={(element) => { buttonRefs.current[index] = element }}
           role="tab"
           type="button"
         >
-          {option.label}
+          {option.label}{option.disabled && <span aria-hidden="true"> · 🔒</span>}
         </button>
       ))}
     </div>

@@ -99,3 +99,15 @@ def test_production_queue_migration_revokes_demo_checkout():
     assert "for update skip locked" in migration.lower()
     assert "max_concurrent_jobs" in migration
     assert "max_duration_seconds" in migration
+
+
+def test_plan_duration_migration_matches_composer_tiers():
+    migration = (
+        app_module.BASE_DIR
+        / "supabase"
+        / "migrations"
+        / "20260901000000_align_plan_duration_tiers.sql"
+    ).read_text(encoding="utf-8").lower()
+    assert "when 'free' then 120" in migration
+    assert "when 'pro' then 240" in migration
+    assert "when 'pro_ultra' then 360" in migration
