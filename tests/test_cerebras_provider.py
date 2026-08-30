@@ -23,6 +23,32 @@ def test_cerebras_can_configure_both_llm_roles(monkeypatch):
     assert planner.base_url == "https://example.test/v1"
 
 
+def test_provider_is_inferred_from_the_first_configured_key(monkeypatch):
+    for name in (
+        "DIRECTOR_PROVIDER", "PLANNER_PROVIDER", "LLM_PROVIDER",
+        "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY",
+        "NVIDIA_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("CEREBRAS_API_KEY", "configured-cerebras-key")
+
+    assert get_llm_config("director").provider == "cerebras"
+    assert get_llm_config("planner").provider == "cerebras"
+    assert llm_provider.llm_configuration_readiness()["ok"] is True
+
+
+def test_missing_provider_key_fails_readiness_without_exposing_a_secret(monkeypatch):
+    for name in (
+        "DIRECTOR_PROVIDER", "PLANNER_PROVIDER", "LLM_PROVIDER",
+        "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY",
+        "NVIDIA_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    result = llm_provider.llm_configuration_readiness()
+    assert result == {"ok": False, "detail": "missing API key for groq"}
+
+
 def test_cerebras_can_be_selected_for_only_the_planner(monkeypatch):
     monkeypatch.delenv("DIRECTOR_PROVIDER", raising=False)
     monkeypatch.setenv("LLM_PROVIDER", "groq")

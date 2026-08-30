@@ -59,10 +59,23 @@ class LLMConfig:
 
 
 def _provider_for(role: str) -> str:
-    provider = os.environ.get(
-        f"{role.upper()}_PROVIDER",
-        os.environ.get("LLM_PROVIDER", "nvidia"),
-    ).strip().lower()
+    explicit = os.environ.get(f"{role.upper()}_PROVIDER", "").strip()
+    if not explicit:
+        explicit = os.environ.get("LLM_PROVIDER", "").strip()
+    if explicit:
+        provider = explicit.lower()
+    else:
+        # Production historically defaulted to NVIDIA even when only a Groq
+        # or Cerebras key was configured. Select the first actually usable
+        # provider instead of binding the process to a missing credential.
+        provider = next(
+            (
+                candidate
+                for candidate in ("groq", "cerebras", "openrouter", "nvidia")
+                if os.environ.get(f"{candidate.upper()}_API_KEY", "").strip()
+            ),
+            "groq",
+        )
 
     if provider not in SUPPORTED_PROVIDERS:
         choices = ", ".join(sorted(SUPPORTED_PROVIDERS))
@@ -191,6 +204,22 @@ def missing_key_message(config: LLMConfig) -> str:
         f"{config.provider.upper()}_API_KEY environment variable is missing "
         f"for the {config.provider} {config.model} model."
     )
+
+
+def llm_configuration_readiness() -> Dict[str, object]:
+    """Report whether both generation roles have usable credentials."""
+    try:
+        configs = [get_llm_config("director"), get_llm_config("planner")]
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "detail": str(exc)}
+    missing = [config.provider for config in configs if not config.api_key]
+    if missing:
+        providers = ", ".join(dict.fromkeys(missing))
+        return {"ok": False, "detail": f"missing API key for {providers}"}
+    roles = ", ".join(f"{role}:{config.provider}" for role, config in zip(
+        ("director", "planner"), configs
+    ))
+    return {"ok": True, "detail": roles}
 
 
 def _is_transient_transport_error(error: Exception) -> bool:

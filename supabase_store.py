@@ -360,6 +360,11 @@ class SupabaseStore:
             row["started_at"] = _now()
         if row.get("status") in {"completed", "failed", "canceled"}:
             row["completed_at"] = _now()
+            row.update({
+                "locked_by": None,
+                "locked_at": None,
+                "heartbeat_at": None,
+            })
         if row:
             # Cancellation is terminal. A worker may finish an in-flight render
             # after the user cancels, but it must never revive that database row.

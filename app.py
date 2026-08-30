@@ -1774,6 +1774,14 @@ def create_video():
     user_id, auth_error = supabase_store.authenticate(request.headers.get("Authorization", ""))
     if auth_error:
         return jsonify({"error": auth_error}), _auth_error_status(auth_error)
+    from llm_provider import llm_configuration_readiness
+
+    llm_readiness = llm_configuration_readiness()
+    if not llm_readiness["ok"]:
+        return jsonify({
+            "error": "Video generation is temporarily unavailable because its AI provider is not configured",
+            "code": "llm_provider_not_configured",
+        }), 503
     try:
         rate = supabase_store.consume_rate_limit(
             f"generation:{user_id or request.remote_addr or 'local'}",
@@ -2179,13 +2187,17 @@ def job_status(job_id: str):
         except Exception as exc:
             app.logger.error("Unable to sign completed job %s: %s", job_id, type(exc).__name__)
             return jsonify({"error": "Video storage is temporarily unavailable"}), 503
-    if not job and supabase_store.enabled:
+    # In queue mode the web and render worker are separate processes. The
+    # web process's local copy remains at `queued`; Supabase is authoritative
+    # for every durable job, including failures and completion progress.
+    if supabase_store.enabled:
         try:
             record = supabase_store.job_record(user_id, job_id)
         except Exception as exc:
             app.logger.error("Unable to load durable job %s: %s", job_id, type(exc).__name__)
             return jsonify({"error": "Job status is temporarily unavailable"}), 503
         if record:
+            scene_rows = supabase_store.scene_records(user_id, job_id)
             job = {
                 "job_id": job_id,
                 "status": record.get("status"),
@@ -2198,7 +2210,16 @@ def job_status(job_id: str):
                 "style": record.get("style"),
                 "target_duration_seconds": record.get("requested_duration_seconds"),
                 "created_at": record.get("created_at"),
-                "scenes": [],
+                "scenes": [
+                    {
+                        "index": int(scene.get("scene_index", index)),
+                        "title": str(scene.get("title") or f"Scene {index + 1}"),
+                        "narration": str(scene.get("narration") or ""),
+                        "status": str(scene.get("status") or "pending"),
+                        "image_url": scene.get("image_url"),
+                    }
+                    for index, scene in enumerate(scene_rows)
+                ],
             }
             if record.get("status") == "completed":
                 video = supabase_store.video_record(user_id, job_id)

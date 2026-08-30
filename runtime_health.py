@@ -60,6 +60,10 @@ def check_readiness(
         }
     except Exception:
         checks["svg_renderer"] = {"ok": False, "detail": "unavailable"}
+    if production:
+        from llm_provider import llm_configuration_readiness
+
+        checks["llm"] = llm_configuration_readiness()
 
     persistence = store.readiness()
     if store.enabled:
