@@ -88,6 +88,7 @@ Variables:
 | `APP_DOMAIN` | Public application hostname, without `https://` |
 | `VITE_PUBLIC_DEMO_URL` | Optional demo URL |
 | `VITE_PUBLIC_DEMO_POSTER_URL` | Optional poster URL |
+| `VITE_PUBLIC_DEMO_TITLE` | Accessible title for the public demo |
 
 Protect the environment with a required reviewer. The release workflow builds
 both AMD64 and ARM64 images, turns on maintenance for an existing deployment,

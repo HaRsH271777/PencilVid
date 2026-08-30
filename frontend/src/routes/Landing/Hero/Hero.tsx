@@ -62,9 +62,10 @@ export function LandingHero() {
   const [generation, setGeneration] = useState(reduced ? 100 : 0)
   const publicDemoUrl = String(import.meta.env.VITE_PUBLIC_DEMO_URL || '').trim()
   const publicDemoPoster = String(import.meta.env.VITE_PUBLIC_DEMO_POSTER_URL || '').trim()
+  const publicDemoTitle = String(import.meta.env.VITE_PUBLIC_DEMO_TITLE || '').trim()
   const demoVideo = publicDemoUrl ? {
     poster: publicDemoPoster || undefined,
-    title: 'Simi Studio explanation',
+    title: publicDemoTitle || 'How binary search finds an answer',
     url: publicDemoUrl,
   } : null
   const heroRef = useRef<HTMLElement>(null)
@@ -84,7 +85,9 @@ export function LandingHero() {
   const openVideoDemo = () => {
     if (!demoVideo) return
     dialogRef.current?.showModal()
-    window.requestAnimationFrame(() => videoRef.current?.play().catch(() => undefined))
+    // Keep play() in the original click activation. Deferring it to an
+    // animation frame causes stricter mobile browsers to reject playback.
+    videoRef.current?.play().catch(() => undefined)
   }
 
   const closeVideoDemo = () => {
