@@ -46,6 +46,11 @@ services:
   worker:
     <<: *runtime
     command: ["python", "worker.py"]
+    # Keep queue traffic isolated from the public edge while still providing
+    # outbound NAT for Supabase and model-provider API calls.
+    networks:
+      - internal
+      - egress
     environment:
       <<: *runtime-environment
       WORKER_HEALTH_FILE: /tmp/pencilvid-worker-heartbeat
@@ -83,6 +88,7 @@ services:
 
 networks:
   edge:
+  egress:
   internal:
     internal: true
 

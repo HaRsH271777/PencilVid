@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from pathlib import Path
+
 import app as app_module
 from supabase_store import SupabaseStore
 
@@ -62,3 +65,48 @@ def test_supabase_readiness_checks_database_and_private_storage(monkeypatch):
     assert requested[0][0].endswith("/rest/v1/plan_catalog")
     assert requested[1][0].endswith("/storage/v1/bucket/video-assets")
     assert requested[0][1]["headers"]["Authorization"] == "Bearer server-key"
+
+
+def test_worker_readiness_requires_a_fresh_queue_heartbeat():
+    store = SupabaseStore()
+    store.enabled = True
+
+    class Response:
+        data = [{
+            "status": "idle",
+            "last_heartbeat_at": datetime.now(timezone.utc).isoformat(),
+        }]
+
+    class Query:
+        def select(self, columns):
+            assert columns == "status,last_heartbeat_at"
+            return self
+
+        def order(self, column, desc=False):
+            assert (column, desc) == ("last_heartbeat_at", True)
+            return self
+
+        def limit(self, count):
+            assert count == 1
+            return self
+
+        @staticmethod
+        def execute():
+            return Response()
+
+    class Client:
+        @staticmethod
+        def table(name):
+            assert name == "render_workers"
+            return Query()
+
+    store.client = Client()
+    assert store.worker_readiness()["ok"] is True
+
+
+def test_oracle_worker_has_private_queue_network_and_outbound_egress():
+    compose = Path("deploy/oracle/compose.yaml").read_text(encoding="utf-8")
+    worker_block = compose.split("  worker:\n", 1)[1].split("  caddy:\n", 1)[0]
+    assert "      - internal\n      - egress\n" in worker_block
+    assert "  egress:\n" in compose
+    assert "  internal:\n    internal: true\n" in compose

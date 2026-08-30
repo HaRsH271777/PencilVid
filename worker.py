@@ -44,6 +44,7 @@ _stop = threading.Event()
 LOGGER = logging.getLogger(__name__)
 _worker_status_lock = threading.Lock()
 _last_worker_status: tuple[float, str, str | None] | None = None
+_last_status_error_log_at = 0.0
 WORKER_HEALTH_FILE = Path(
     os.environ.get(
         "WORKER_HEALTH_FILE",
@@ -57,9 +58,8 @@ def _request_stop(_signum=None, _frame=None) -> None:
 
 
 def _touch_health(status: str, job_id: str | None = None) -> None:
-    global _last_worker_status
+    global _last_worker_status, _last_status_error_log_at
     WORKER_HEALTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-    WORKER_HEALTH_FILE.write_text(str(time.time()), encoding="ascii")
     now = time.monotonic()
     with _worker_status_lock:
         if (
@@ -67,12 +67,19 @@ def _touch_health(status: str, job_id: str | None = None) -> None:
             and _last_worker_status[1:] == (status, job_id)
             and now - _last_worker_status[0] < HEARTBEAT_SECONDS
         ):
+            WORKER_HEALTH_FILE.write_text(str(time.time()), encoding="ascii")
             return
         try:
             supabase_store.set_worker_status(WORKER_ID, status, job_id)
             _last_worker_status = (now, status, job_id)
+            WORKER_HEALTH_FILE.write_text(str(time.time()), encoding="ascii")
         except Exception as exc:
-            LOGGER.warning("worker_status_update_failed", extra={"error_type": type(exc).__name__})
+            if now - _last_status_error_log_at >= HEARTBEAT_SECONDS:
+                LOGGER.warning(
+                    "worker_status_update_failed",
+                    extra={"error_type": type(exc).__name__},
+                )
+                _last_status_error_log_at = now
 
 
 def _heartbeat(job_id: str, job_done: threading.Event) -> None:

@@ -64,6 +64,10 @@ def check_readiness(
     persistence = store.readiness()
     if store.enabled:
         checks.update(persistence)
+        if production:
+            checks["worker"] = store.worker_readiness(
+                int(os.environ.get("WORKER_HEALTH_MAX_AGE_SECONDS", "90"))
+            )
     else:
         checks["database"] = {
             "ok": not production,

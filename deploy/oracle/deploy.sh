@@ -46,6 +46,29 @@ for attempt in $(seq 1 60); do
   sleep 2
 done
 
+# A worker is not operational merely because its Python process is alive. Its
+# health file is now refreshed only after a successful durable-queue heartbeat.
+worker_id="$(docker compose --env-file "${env_file}" -f compose.yaml ps -q worker)"
+for attempt in $(seq 1 60); do
+  worker_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "${worker_id}" 2>/dev/null || true)"
+  if [[ "${worker_health}" == "healthy" ]]; then
+    break
+  fi
+  if [[ "${attempt}" -eq 60 ]]; then
+    docker compose --env-file "${env_file}" -f compose.yaml logs --tail 150 web worker
+    if [[ -n "${previous_image}" ]]; then
+      echo "New worker failed queue readiness; rolling back to ${previous_image}." >&2
+      IMAGE="${previous_image}" docker compose --env-file "${env_file}" -f compose.yaml up -d --no-deps web worker
+      if [[ -f .previous-deployment.env ]]; then
+        cp .previous-deployment.env .deployment.env
+        chmod 600 .deployment.env
+      fi
+    fi
+    exit 1
+  fi
+  sleep 2
+done
+
 ./maintenance.sh off
 web_id="$(docker compose --env-file "${env_file}" -f compose.yaml ps -q web)"
 for attempt in $(seq 1 60); do

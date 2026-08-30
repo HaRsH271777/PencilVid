@@ -98,6 +98,39 @@ class SupabaseStore:
         except httpx.HTTPError:
             return failed
 
+    def worker_readiness(self, max_age_seconds: int = 90) -> Dict[str, Any]:
+        """Verify that a production render worker can reach the durable queue."""
+        if not self.enabled:
+            return {"ok": False, "detail": "database not configured"}
+        try:
+            response = self.client.table("render_workers").select(  # type: ignore[union-attr]
+                "status,last_heartbeat_at"
+            ).order("last_heartbeat_at", desc=True).limit(1).execute()
+            rows = list(response.data or [])
+            if not rows:
+                return {"ok": False, "detail": "no worker registered"}
+            row = rows[0]
+            heartbeat = datetime.fromisoformat(
+                str(row.get("last_heartbeat_at") or "").replace("Z", "+00:00")
+            )
+            age = max(
+                0,
+                int((datetime.now(timezone.utc) - heartbeat).total_seconds()),
+            )
+            status = str(row.get("status") or "unknown")
+            ok = status in {"idle", "busy"} and age <= max(30, max_age_seconds)
+            return {
+                "ok": ok,
+                "detail": (
+                    f"{status}; heartbeat {age}s ago"
+                    if ok
+                    else "worker heartbeat stale"
+                ),
+            }
+        except Exception as exc:
+            LOGGER.error("Supabase worker readiness failed: %s", type(exc).__name__)
+            return {"ok": False, "detail": "worker heartbeat unavailable"}
+
     def _upload_file(self, bucket: str, remote_path: str, local_path: Path, mime_type: str) -> Optional[str]:
         if not self.client or not local_path.is_file():
             return None
