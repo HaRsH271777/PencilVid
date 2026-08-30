@@ -11,6 +11,13 @@ export function Auth() {
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const notice = searchParams.get('reset') === 'success'
+    ? 'Password reset complete. Sign in with your new password.'
+    : searchParams.get('password') === 'changed'
+      ? 'Password changed. Sign in again to continue.'
+      : searchParams.get('account') === 'deleted'
+        ? 'Your account and private data were permanently deleted.'
+        : ''
 
   const switchMode = (next: 'signin' | 'signup') => {
     setSearchParams(next === 'signup' ? { mode: 'signup' } : {}, { replace: true })
@@ -88,8 +95,9 @@ export function Auth() {
 
             <div className={styles.options}>
               <label className={styles.check}><input required={signingUp} type="checkbox" /><span>{signingUp ? 'I agree to the Terms and Privacy Policy' : 'Keep me signed in'}</span></label>
-              {!signingUp && <a href="#forgot">Forgot password?</a>}
+              {!signingUp && <Link to="/auth/forgot">Forgot password?</Link>}
             </div>
+            {notice && <p className={styles.success} role="status">{notice}</p>}
             {error && <p className={styles.error} role="alert">{error}</p>}
             <button className={styles.submit} disabled={submitting} type="submit"><span>{submitting ? 'OPENING STUDIO…' : signingUp ? 'CREATE ACCOUNT' : 'SIGN IN'}</span><b aria-hidden="true">→</b></button>
           </form>

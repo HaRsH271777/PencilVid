@@ -20,9 +20,11 @@ export interface AuthResult {
 
 const STORAGE_KEY = 'simi-studio-user'
 const AUTH_EVENT = 'simi-auth-change'
+const RECOVERY_KEY = 'simi-password-recovery'
 let cachedRaw: string | null | undefined
 let cachedUser: AuthUser | null = null
 let authReady = !supabase
+let recoveryReady = typeof window !== 'undefined' && window.sessionStorage.getItem(RECOVERY_KEY) === '1'
 
 function normalizePlan(value: unknown): PlanName {
   if (value === 'pro_ultra' || value === 'Pro Ultra') return 'Pro Ultra'
@@ -100,7 +102,12 @@ async function syncSession(session: Session | null) {
 
 if (supabase) {
   void supabase.auth.getSession().then(({ data }) => syncSession(data.session))
-  supabase.auth.onAuthStateChange((_event, session) => {
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      recoveryReady = true
+      window.sessionStorage.setItem(RECOVERY_KEY, '1')
+      window.dispatchEvent(new Event(AUTH_EVENT))
+    }
     window.setTimeout(() => void syncSession(session), 0)
   })
 }
@@ -111,6 +118,10 @@ export function useAuthUser() {
 
 export function useAuthReady() {
   return useSyncExternalStore(subscribe, () => authReady, () => !supabase)
+}
+
+export function usePasswordRecoveryReady() {
+  return useSyncExternalStore(subscribe, () => recoveryReady, () => false)
 }
 
 export function setAuthUser(user: AuthUser) {
@@ -141,10 +152,37 @@ export async function signUp(name: string, email: string, password: string): Pro
 }
 
 export async function clearAuthUser() {
-  if (supabase) {
-    const { error } = await supabase.auth.signOut()
-    if (error) throw error
+  try {
+    if (supabase) {
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+    }
+  } finally {
+    publishUser(null)
   }
+}
+
+export async function requestPasswordReset(email: string) {
+  if (!supabase) throw new Error('Password recovery requires configured account services.')
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/auth/recovery`,
+  })
+  if (error) throw error
+}
+
+export async function completePasswordRecovery(password: string) {
+  if (!supabase || !recoveryReady) throw new Error('This recovery link is invalid or has expired.')
+  const { error } = await supabase.auth.updateUser({ password })
+  if (error) throw error
+  recoveryReady = false
+  window.sessionStorage.removeItem(RECOVERY_KEY)
+  window.dispatchEvent(new Event(AUTH_EVENT))
+}
+
+export async function clearDeletedAuthUser() {
+  if (supabase) await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
+  recoveryReady = false
+  window.sessionStorage.removeItem(RECOVERY_KEY)
   publishUser(null)
 }
 

@@ -236,3 +236,37 @@ export function startBillingCheckout(plan: 'Pro' | 'Pro Ultra') {
     body: JSON.stringify({ plan: plan === 'Pro Ultra' ? 'pro_ultra' : 'pro' }),
   })
 }
+
+export async function auditPasswordResetRequest(email: string) {
+  await fetch(apiPath('/account/password-reset-request'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  }).catch(() => undefined)
+}
+
+export function recordPasswordResetComplete() {
+  return apiRequest<{ recorded: boolean }>('/account/password-reset-complete', { method: 'POST' })
+}
+
+export function changeAccountPassword(
+  currentPassword: string,
+  newPassword: string,
+  confirmation: string,
+) {
+  return apiRequest<{ changed: boolean; reauthentication_required: boolean }>('/account/password', {
+    method: 'POST',
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+      new_password_confirmation: confirmation,
+    }),
+  })
+}
+
+export function deleteAccount(currentPassword: string, confirmation: string) {
+  return apiRequest<{ deleted: boolean }>('/account', {
+    method: 'DELETE',
+    body: JSON.stringify({ current_password: currentPassword, confirmation }),
+  })
+}

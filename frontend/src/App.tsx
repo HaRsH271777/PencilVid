@@ -5,6 +5,7 @@ import { ProductionProvider } from './components/ProductionProvider'
 import { useProduction } from './hooks/useProduction'
 import { useAuthReady, useAuthUser } from './lib/auth'
 import { Auth } from './routes/Auth'
+import { ForgotPassword, ResetPassword } from './routes/Auth/PasswordRecovery'
 import { Account } from './routes/Account'
 import { Checkout } from './routes/Checkout'
 import { Home } from './routes/Home'
@@ -81,6 +82,8 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/auth" element={<Auth />} />
+      <Route path="/auth/forgot" element={<ForgotPassword />} />
+      <Route path="/auth/recovery" element={<ResetPassword />} />
       <Route path="/checkout" element={<Checkout />} />
       <Route path="/app" element={<RequireAuth><StudioLayout /></RequireAuth>}>
         <Route index element={<Home />} />

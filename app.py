@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request, send_from_directory
+from flask import Flask, Response, g, jsonify, render_template, request, send_from_directory
 from flask_socketio import SocketIO, disconnect, join_room
 from werkzeug.utils import secure_filename
 
@@ -174,6 +175,10 @@ MAX_PROMPT_CHARS = max(100, int(os.environ.get("MAX_PROMPT_CHARS", "4000")))
 MAX_VIDEO_DURATION_SECONDS = max(20, int(os.environ.get("MAX_VIDEO_DURATION_SECONDS", "1800")))
 GENERATION_RATE_LIMIT = max(1, int(os.environ.get("GENERATION_RATE_LIMIT", "10")))
 GENERATION_RATE_WINDOW_SECONDS = max(1, int(os.environ.get("GENERATION_RATE_WINDOW_SECONDS", "3600")))
+PASSWORD_RESET_RATE_LIMIT = max(1, int(os.environ.get("PASSWORD_RESET_RATE_LIMIT", "3")))
+PASSWORD_RESET_RATE_WINDOW_SECONDS = max(
+    60, int(os.environ.get("PASSWORD_RESET_RATE_WINDOW_SECONDS", "3600"))
+)
 JOB_EXECUTION_MODE = os.environ.get(
     "JOB_EXECUTION_MODE", "queue" if IS_PRODUCTION else "inline"
 ).strip().lower()
@@ -246,6 +251,41 @@ def _auth_error_status(message: Optional[str]) -> int:
     return 503 if message and "temporarily unavailable" in message.lower() else 401
 
 
+def _account_subject_hash(value: str) -> str:
+    normalized = value.strip().lower().encode("utf-8")
+    return hmac.new(_media_signing_key, normalized, hashlib.sha256).hexdigest()
+
+
+def _audit_account_event(
+    subject: str, event_type: str, outcome: str, metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    supabase_store.record_security_event(
+        _account_subject_hash(subject),
+        event_type,
+        outcome,
+        str(getattr(g, "request_id", "")),
+        metadata,
+    )
+
+
+def _remove_local_account_jobs(job_ids: List[str]) -> None:
+    """Remove only validated per-job directories beneath configured roots."""
+    with _jobs_lock:
+        for job_id in job_ids:
+            _jobs.pop(job_id, None)
+    with _segment_state_lock:
+        for job_id in job_ids:
+            _segment_state.pop(job_id, None)
+    for job_id in job_ids:
+        if not re.fullmatch(r"[0-9a-f]{12}", job_id):
+            continue
+        for root in (WORK_DIR, OUTPUT_DIR):
+            root_path = root.resolve()
+            target = (root_path / job_id).resolve()
+            if target.parent == root_path and target.is_dir():
+                shutil.rmtree(target)
+
+
 def _authorized_job(job_id: str) -> Tuple[Optional[str], Optional[Tuple[Any, int]]]:
     user_id, error = supabase_store.authenticate(request.headers.get("Authorization", ""))
     if error:
@@ -316,6 +356,104 @@ def _secure_local_media_urls(job: Dict[str, Any]) -> Dict[str, Any]:
 @app.errorhandler(413)
 def request_too_large(_error):
     return jsonify({"error": f"Upload exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit"}), 413
+
+
+@app.route("/api/account/password-reset-request", methods=["POST"])
+def account_password_reset_request():
+    """Audit and rate-limit a recovery request without revealing account existence."""
+    data = request.get_json(silent=True) or {}
+    email = str(data.get("email") or "").strip().lower()
+    if not email or len(email) > 320 or "@" not in email:
+        return jsonify({"error": "Enter a valid email address"}), 400
+    subject_hash = _account_subject_hash(email)
+    if supabase_store.enabled:
+        try:
+            rate = supabase_store.consume_rate_limit(
+                f"password-reset:{subject_hash}",
+                PASSWORD_RESET_RATE_LIMIT,
+                PASSWORD_RESET_RATE_WINDOW_SECONDS,
+            )
+            outcome = "requested" if rate.get("allowed") else "blocked"
+            _audit_account_event(email, "password_reset", outcome)
+        except Exception:
+            _audit_account_event(email, "password_reset", "failed")
+    return jsonify({"accepted": True}), 202
+
+
+@app.route("/api/account/password-reset-complete", methods=["POST"])
+def account_password_reset_complete():
+    user_id, error = supabase_store.authenticate(request.headers.get("Authorization", ""))
+    if error:
+        return jsonify({"error": error}), _auth_error_status(error)
+    if user_id:
+        _audit_account_event(user_id, "password_reset", "succeeded")
+    return jsonify({"recorded": True})
+
+
+@app.route("/api/account/password", methods=["POST"])
+def account_password_change():
+    user, error = supabase_store.authenticated_user(request.headers.get("Authorization", ""))
+    if error or not user:
+        return jsonify({"error": error or "Authentication required"}), _auth_error_status(error)
+    user_id = str(user.get("id") or "")
+    email = str(user.get("email") or "")
+    data = request.get_json(silent=True) or {}
+    current_password = str(data.get("current_password") or "")
+    new_password = str(data.get("new_password") or "")
+    confirmation = str(data.get("new_password_confirmation") or "")
+    if len(current_password) < 1:
+        return jsonify({"error": "Enter your current password"}), 400
+    if len(new_password) < 8:
+        return jsonify({"error": "New password must contain at least 8 characters"}), 400
+    if new_password != confirmation:
+        return jsonify({"error": "New passwords do not match"}), 400
+    if new_password == current_password:
+        return jsonify({"error": "Choose a password different from your current password"}), 400
+    verified, reauth_error = supabase_store.reauthenticate_password(user_id, email, current_password)
+    if not verified:
+        _audit_account_event(user_id, "password_change", "rejected", {"reason": "reauthentication"})
+        return jsonify({"error": reauth_error or "Current password is incorrect"}), _auth_error_status(reauth_error)
+    try:
+        supabase_store.update_account_password(user_id, new_password)
+    except Exception:
+        _audit_account_event(user_id, "password_change", "failed")
+        return jsonify({"error": "Password could not be changed right now"}), 503
+    _audit_account_event(user_id, "password_change", "succeeded")
+    return jsonify({"changed": True, "reauthentication_required": True})
+
+
+@app.route("/api/account", methods=["DELETE"])
+def account_delete():
+    user, error = supabase_store.authenticated_user(request.headers.get("Authorization", ""))
+    if error or not user:
+        return jsonify({"error": error or "Authentication required"}), _auth_error_status(error)
+    user_id = str(user.get("id") or "")
+    email = str(user.get("email") or "")
+    data = request.get_json(silent=True) or {}
+    password = str(data.get("current_password") or "")
+    if data.get("confirmation") != "DELETE MY ACCOUNT":
+        return jsonify({"error": "Type DELETE MY ACCOUNT to confirm"}), 400
+    if not password:
+        return jsonify({"error": "Enter your current password"}), 400
+    _audit_account_event(user_id, "account_deletion", "requested")
+    verified, reauth_error = supabase_store.reauthenticate_password(user_id, email, password)
+    if not verified:
+        _audit_account_event(user_id, "account_deletion", "rejected", {"reason": "reauthentication"})
+        return jsonify({"error": reauth_error or "Current password is incorrect"}), _auth_error_status(reauth_error)
+    try:
+        job_ids = supabase_store.delete_account(user_id)
+    except RuntimeError as exc:
+        if str(exc) == "active_jobs":
+            _audit_account_event(user_id, "account_deletion", "blocked", {"reason": "active_jobs"})
+            return jsonify({"error": "Wait for active video generations to finish before deleting your account"}), 409
+        _audit_account_event(user_id, "account_deletion", "failed")
+        return jsonify({"error": "Account deletion could not be completed safely"}), 503
+    except Exception:
+        _audit_account_event(user_id, "account_deletion", "failed")
+        return jsonify({"error": "Account deletion could not be completed safely"}), 503
+    _remove_local_account_jobs(job_ids)
+    _audit_account_event(user_id, "account_deletion", "succeeded", {"jobs_removed": len(job_ids)})
+    return jsonify({"deleted": True})
 
 
 @app.route("/healthz")

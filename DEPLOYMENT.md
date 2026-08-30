@@ -87,6 +87,13 @@ push` applies every migration.
 After baselining, all schema changes must be new committed migrations. Never
 edit the remote production schema directly in Table Editor or SQL Editor.
 
+For account recovery, Authentication -> URL Configuration must allow
+`https://explainora.dev/auth/recovery` (and the localhost equivalent during
+development). Configure a custom SMTP sender before public rollout; the
+Supabase default sender is not a production delivery service. Migration
+`20260902000000_account_lifecycle.sql` adds the service-role-only pseudonymous
+security audit. Purge audit entries older than 365 days on a scheduled basis.
+
 ## 3. GitHub environment and secrets
 
 In Repository Settings -> Environments, create `production`. Protect it with a
@@ -213,7 +220,10 @@ Never test a restore by overwriting the live production project.
 2. Approve and run `Release` for the protected production environment.
 3. The workflow enables maintenance, applies migrations, and deploys the exact
    GHCR SHA to Oracle.
-4. Verify `/readyz`, sign-in, quota reservation, one render, playback, and logout.
+4. Verify `/readyz`, sign-in, password recovery delivery/callback, password
+   change plus forced sign-in, quota reservation, one render, playback, and
+   logout. Test account deletion only with a dedicated disposable user and
+   verify its private Storage prefixes were removed.
 
 Application rollback means redeploying the preceding immutable SHA. Database
 rollbacks must be forward migrations; do not delete an applied migration or

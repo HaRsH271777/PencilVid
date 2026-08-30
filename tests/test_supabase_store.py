@@ -58,6 +58,114 @@ def test_authenticate_validates_bearer_token_with_auth_server(monkeypatch):
     assert store.authenticate("Bearer access-token") == ("user-id", None)
 
 
+def test_reauthenticate_password_verifies_the_same_user(monkeypatch):
+    store = SupabaseStore()
+    store.enabled = True
+    store.url = "https://example.supabase.co"
+    store.secret_key = "server-key"
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {"user": {"id": "user-id"}, "access_token": "temporary-token"}
+
+    def fake_post(url, **kwargs):
+        if url.endswith("/logout"):
+            assert kwargs["headers"]["Authorization"] == "Bearer temporary-token"
+            return Response()
+        assert url == "https://example.supabase.co/auth/v1/token"
+        assert kwargs["params"] == {"grant_type": "password"}
+        assert kwargs["headers"]["apikey"] == "server-key"
+        assert kwargs["json"] == {"email": "user@example.com", "password": "secret"}
+        assert kwargs["timeout"] == 10.0
+        return Response()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert store.reauthenticate_password("user-id", "user@example.com", "secret") == (True, None)
+
+
+def test_storage_cleanup_recursively_lists_only_objects():
+    store = SupabaseStore()
+    store.enabled = True
+
+    class Storage:
+        def list(self, path, _options):
+            return {
+                "user-id": [{"name": "videos", "id": None, "metadata": None}, {"name": "avatar.png", "id": "1"}],
+                "user-id/videos": [{"name": "final.mp4", "id": "2"}],
+            }.get(path, [])
+
+    class StorageRoot:
+        @staticmethod
+        def from_(_bucket):
+            return Storage()
+
+    class Client:
+        storage = StorageRoot()
+
+    store.client = Client()
+    assert set(store._storage_paths_below("video-assets", "user-id")) == {
+        "user-id/avatar.png", "user-id/videos/final.mp4",
+    }
+
+
+def test_delete_account_locks_generation_before_storage_and_auth_cleanup(monkeypatch):
+    store = SupabaseStore()
+    store.enabled = True
+    calls = []
+
+    class Result:
+        data = True
+
+    class Call:
+        @staticmethod
+        def execute():
+            calls.append("locked")
+            return Result()
+
+    class Bucket:
+        @staticmethod
+        def remove(paths):
+            calls.append(("remove", paths))
+
+    class Storage:
+        @staticmethod
+        def from_(bucket):
+            calls.append(("bucket", bucket))
+            return Bucket()
+
+    class Admin:
+        @staticmethod
+        def delete_user(user_id, should_soft_delete):
+            calls.append(("delete_user", user_id, should_soft_delete))
+
+    class Auth:
+        admin = Admin()
+
+    class Client:
+        storage = Storage()
+        auth = Auth()
+
+        @staticmethod
+        def rpc(name, params):
+            assert name == "prepare_account_deletion"
+            assert params == {"p_user_id": "user-id"}
+            return Call()
+
+    store.client = Client()
+    monkeypatch.setattr(store, "account_job_ids", lambda _user_id: ["abcdef123456"])
+    monkeypatch.setattr(store, "_storage_paths_below", lambda bucket, _prefix: [f"user-id/{bucket}.bin"])
+    assert store.delete_account("user-id") == ["abcdef123456"]
+    assert calls[0] == "locked"
+    assert calls[-1] == ("delete_user", "user-id", False)
+
+
 def test_authenticate_rejects_expired_session(monkeypatch):
     store = SupabaseStore()
     store.enabled = True

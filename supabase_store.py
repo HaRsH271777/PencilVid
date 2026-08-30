@@ -114,6 +114,11 @@ class SupabaseStore:
             return None
 
     def authenticate(self, authorization: str) -> Tuple[Optional[str], Optional[str]]:
+        user, error = self.authenticated_user(authorization)
+        return (str(user.get("id")), None) if user else (None, error)
+
+    def authenticated_user(self, authorization: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Validate a bearer token and return its Auth user without sharing client state."""
         if not self.enabled:
             return None, None
         if not authorization.startswith("Bearer "):
@@ -136,14 +141,126 @@ class SupabaseStore:
             if response.status_code in {401, 403}:
                 return None, "Invalid or expired session"
             response.raise_for_status()
-            user_id = str(response.json().get("id") or "")
-            return (user_id, None) if user_id else (None, "Invalid or expired session")
+            user = response.json()
+            user_id = str(user.get("id") or "")
+            return (user, None) if user_id else (None, "Invalid or expired session")
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
             LOGGER.error("Supabase Auth is unreachable: %s", type(exc).__name__)
             return None, "Authentication service temporarily unavailable"
         except Exception as exc:
             LOGGER.warning("Supabase rejected the presented session: %s", type(exc).__name__)
             return None, "Invalid or expired session"
+
+    def reauthenticate_password(
+        self, user_id: str, email: str, password: str,
+    ) -> Tuple[bool, Optional[str]]:
+        """Verify the caller's current password directly with Supabase Auth."""
+        try:
+            response = httpx.post(
+                f"{self.url}/auth/v1/token",
+                params={"grant_type": "password"},
+                headers={"apikey": self.secret_key, "Content-Type": "application/json"},
+                json={"email": email, "password": password},
+                timeout=10.0,
+            )
+            if response.status_code in {400, 401, 403}:
+                return False, "Current password is incorrect"
+            response.raise_for_status()
+            payload = response.json()
+            verified_id = str((payload.get("user") or {}).get("id") or "")
+            access_token = str(payload.get("access_token") or "")
+            if access_token:
+                try:
+                    httpx.post(
+                        f"{self.url}/auth/v1/logout",
+                        headers={"apikey": self.secret_key, "Authorization": f"Bearer {access_token}"},
+                        timeout=10.0,
+                    )
+                except httpx.HTTPError:
+                    LOGGER.warning("Temporary reauthentication session could not be revoked immediately")
+            return (verified_id == user_id, None if verified_id == user_id else "Current password is incorrect")
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout):
+            return False, "Authentication service temporarily unavailable"
+        except Exception as exc:
+            LOGGER.error("Supabase password reauthentication failed: %s", type(exc).__name__)
+            return False, "Authentication service temporarily unavailable"
+
+    def update_account_password(self, user_id: str, new_password: str) -> None:
+        if not self.client:
+            raise RuntimeError("Account service is unavailable")
+        self.client.auth.admin.update_user_by_id(user_id, {"password": new_password})
+
+    def record_security_event(
+        self,
+        subject_hash: str,
+        event_type: str,
+        outcome: str,
+        request_id: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist a non-PII account security event; failures never expose secrets."""
+        if not self.client:
+            return
+        row = {
+            "subject_hash": subject_hash[:64],
+            "event_type": event_type[:80],
+            "outcome": outcome[:32],
+            "request_id": request_id[:80] or None,
+            "metadata": metadata or {},
+        }
+        try:
+            self.client.table("account_security_audit").insert(row).execute()
+        except Exception as exc:
+            LOGGER.error("Supabase security audit failed: %s", type(exc).__name__)
+
+    def account_job_ids(self, user_id: str) -> List[str]:
+        response = self.client.table("video_jobs").select("id").eq(  # type: ignore[union-attr]
+            "user_id", user_id
+        ).execute()
+        return [str(row["id"]) for row in (response.data or []) if row.get("id")]
+
+    def _storage_paths_below(self, bucket: str, prefix: str) -> List[str]:
+        """Recursively enumerate Storage objects beneath a user's private prefix."""
+        storage = self.client.storage.from_(bucket)  # type: ignore[union-attr]
+        paths: List[str] = []
+        pending = [prefix.strip("/")]
+        while pending:
+            folder = pending.pop()
+            offset = 0
+            while True:
+                rows = storage.list(folder, {"limit": 1000, "offset": offset})
+                for row in rows:
+                    name = str(row.get("name") or "").strip("/")
+                    if not name:
+                        continue
+                    path = f"{folder}/{name}" if folder else name
+                    if row.get("id") or row.get("metadata") is not None:
+                        paths.append(path)
+                    else:
+                        pending.append(path)
+                if len(rows) < 1000:
+                    break
+                offset += len(rows)
+        return paths
+
+    def delete_account(self, user_id: str) -> List[str]:
+        """Remove private objects then hard-delete Auth; database rows cascade."""
+        if not self.client:
+            raise RuntimeError("Account service is unavailable")
+        try:
+            self.client.rpc("prepare_account_deletion", {"p_user_id": user_id}).execute()
+        except Exception as exc:
+            if "active_jobs" in str(exc).lower():
+                raise RuntimeError("active_jobs") from exc
+            raise
+        job_ids = self.account_job_ids(user_id)
+        for bucket in ("avatars", "source-documents", "video-assets"):
+            storage = self.client.storage.from_(bucket)
+            paths = self._storage_paths_below(bucket, user_id)
+            for start in range(0, len(paths), 100):
+                storage.remove(paths[start:start + 100])
+        self.client.auth.admin.delete_user(user_id, should_soft_delete=False)
+        return job_ids
 
     def create_job(self, user_id: Optional[str], job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self.enabled or not user_id:

@@ -13,6 +13,8 @@ order using the Supabase SQL Editor:
 2. `20260829000000_atomic_quotas_and_blue_plans.sql`
 3. `20260830000000_stage1_security_architecture.sql`
 4. `20260831000000_production_operations.sql`
+5. `20260901000000_align_plan_duration_tiers.sql`
+6. `20260902000000_account_lifecycle.sql`
 
 The migrations create Auth-linked profiles, preferences, plans, subscriptions,
 payment history, atomic quotas, source documents, generation jobs/events,
@@ -55,9 +57,23 @@ The secret key bypasses RLS and must remain server-only. Never prefix it with
 ## 4. Configure Auth
 
 In Supabase Dashboard → Authentication → URL Configuration, set the local site
-URL to `http://localhost:5173` and add the production domain when available.
+URL to `http://localhost:5173` and add these redirect URLs:
+
+- `http://localhost:5173/auth/recovery`
+- `https://explainora.dev/auth/recovery`
+
 Choose whether email confirmation is required. The UI handles both immediate
 sessions and confirmation-required signups.
+
+Configure a custom SMTP provider before public rollout. Supabase's default mail
+sender is best-effort and is too tightly rate-limited for production password
+recovery. Keep leaked-password protection enabled. Password changes and account
+deletion also verify the current password in the backend before proceeding.
+
+The `account_security_audit` table stores keyed pseudonymous subject hashes,
+never raw user IDs, emails, IPs, tokens, or passwords. Restrict it to the
+service role and delete records older than 365 days with a scheduled database
+job or an equivalent operational retention task.
 
 ## 5. Billing transition
 

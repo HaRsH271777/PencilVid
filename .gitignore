@@ -47,3 +47,4 @@ logs/
 
 # ArchitectIQ graph cache
 .architectiq/
+supabase/.temp/
