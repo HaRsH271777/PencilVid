@@ -143,6 +143,24 @@ Required runtime secrets:
 - `MEDIA_SIGNING_KEY` (unique random value, at least 32 characters)
 - every configured LLM provider key used by the director/planner
 
+Production preserves role-specific provider routing rather than forcing every
+request through one service. The recommended configuration is:
+
+```env
+LLM_PROVIDER=groq
+DIRECTOR_PROVIDER=cerebras
+PLANNER_PROVIDER=groq
+CEREBRAS_API_KEY=...
+CEREBRAS_API_KEYS=...
+GROQ_API_KEY=...
+GROQ_API_KEYS=...
+```
+
+Provider-specific model variables such as `CEREBRAS_DIRECTOR_MODEL`,
+`GROQ_PLANNER_MODEL`, and `GROQ_FAST_PLANNER_MODEL` remain authoritative. Keep
+the populated file only at `/opt/pencilvid/env/production.env`; never commit it
+or bake it into the container image.
+
 Required runtime configuration:
 
 ```env

@@ -110,3 +110,15 @@ def test_oracle_worker_has_private_queue_network_and_outbound_egress():
     assert "      - internal\n      - egress\n" in worker_block
     assert "  egress:\n" in compose
     assert "  internal:\n    internal: true\n" in compose
+
+
+def test_oracle_environment_template_preserves_role_based_llm_routing():
+    template = Path("deploy/oracle/production.env.example").read_text(
+        encoding="utf-8"
+    )
+    assert "LLM_PROVIDER=groq" in template
+    assert "DIRECTOR_PROVIDER=cerebras" in template
+    assert "PLANNER_PROVIDER=groq" in template
+    assert "CEREBRAS_DIRECTOR_MODEL=gpt-oss-120b" in template
+    assert "GROQ_PLANNER_MODEL=qwen/qwen3.6-27b" in template
+    assert "GROQ_FAST_PLANNER_MODEL=openai/gpt-oss-20b" in template

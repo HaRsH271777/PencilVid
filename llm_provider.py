@@ -216,9 +216,10 @@ def llm_configuration_readiness() -> Dict[str, object]:
     if missing:
         providers = ", ".join(dict.fromkeys(missing))
         return {"ok": False, "detail": f"missing API key for {providers}"}
-    roles = ", ".join(f"{role}:{config.provider}" for role, config in zip(
-        ("director", "planner"), configs
-    ))
+    roles = ", ".join(
+        f"{role}:{config.provider}/{config.model}"
+        for role, config in zip(("director", "planner"), configs)
+    )
     return {"ok": True, "detail": roles}
 
 

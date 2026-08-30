@@ -34,7 +34,9 @@ def test_provider_is_inferred_from_the_first_configured_key(monkeypatch):
 
     assert get_llm_config("director").provider == "cerebras"
     assert get_llm_config("planner").provider == "cerebras"
-    assert llm_provider.llm_configuration_readiness()["ok"] is True
+    readiness = llm_provider.llm_configuration_readiness()
+    assert readiness["ok"] is True
+    assert "director:cerebras/gpt-oss-120b" in readiness["detail"]
 
 
 def test_missing_provider_key_fails_readiness_without_exposing_a_secret(monkeypatch):
