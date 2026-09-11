@@ -26,7 +26,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_ENV=production \
     JOB_EXECUTION_MODE=queue \
     USE_STREAMING=0 \
-    TTS_BACKEND=espeak \
+    TTS_BACKEND=piper \
+    PIPER_BIN=piper \
+    PIPER_MODEL=/app/voices/en_US-lessac-medium.onnx \
     ESPEAK_BIN=espeak-ng \
     FFMPEG_BIN=ffmpeg \
     FFPROBE_BIN=ffprobe \
@@ -55,10 +57,22 @@ COPY requirements.txt requirements.lock ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && pip install -r requirements.lock
 
+# The voice files are deliberately not stored in Git. Pin both downloads to
+# immutable voice release URLs and verify their content in BuildKit so an
+# upstream change cannot silently alter production narration.
+RUN mkdir -p /app/voices
+ADD --checksum=sha256:5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f \
+    https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx \
+    /app/voices/en_US-lessac-medium.onnx
+ADD --checksum=sha256:efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0 \
+    https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json \
+    /app/voices/en_US-lessac-medium.onnx.json
+
 COPY --chown=10001:10001 . .
 COPY --from=frontend-build --chown=10001:10001 /build/frontend/dist /app/frontend/dist
 RUN mkdir -p /home/pencilvid /app/work/uploads /app/work/icon_cache \
       /app/work/logs/runs /app/outputs \
+    && chmod 0444 /app/voices/en_US-lessac-medium.onnx* \
     && chown -R 10001:10001 /home/pencilvid /app/work /app/outputs
 
 USER 10001:10001

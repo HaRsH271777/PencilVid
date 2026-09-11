@@ -21,7 +21,11 @@ x-app: &app
     # Do not leak host-specific Windows paths/backends into the Linux image.
     FFMPEG_BIN: ffmpeg
     FFPROBE_BIN: ffprobe
-    TTS_BACKEND: ${CONTAINER_TTS_BACKEND:-espeak}
+    # Production voice identity is part of the product contract. Fail closed
+    # if Piper is unavailable instead of silently changing narrators.
+    TTS_BACKEND: piper
+    PIPER_BIN: piper
+    PIPER_MODEL: /app/voices/en_US-lessac-medium.onnx
     SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL in .env}
     SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?Set SUPABASE_SECRET_KEY in .env}
     MEDIA_SIGNING_KEY: ${MEDIA_SIGNING_KEY:?Set MEDIA_SIGNING_KEY in .env}

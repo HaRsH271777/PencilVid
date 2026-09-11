@@ -26,10 +26,15 @@ private Supabase Storage. Local `work/` and `outputs/` are scratch space only.
 ## 1. Local production image
 
 The production Compose file pins `FFMPEG_BIN=ffmpeg`, `FFPROBE_BIN=ffprobe`,
-and defaults `CONTAINER_TTS_BACKEND` to `espeak` inside Linux. This prevents
-Windows development paths in `.env` from overriding tools installed in the
-image. Only change `CONTAINER_TTS_BACKEND` when that backend and its model are
-also installed in the deployment image.
+and pins `TTS_BACKEND=piper` inside Linux. The immutable image installs the
+native Piper runtime and downloads the
+`en_US-lessac-medium` ONNX voice from its pinned voice release with SHA-256
+verification. Compose also pins the container paths for the executable and
+model, preventing Windows development paths in `.env` from overriding them.
+Piper is fail-closed in production: if its executable or ONNX model is
+missing, readiness fails instead of silently generating with a different
+voice. An emergency switch to eSpeak therefore requires an explicit reviewed
+Compose change.
 
 Start Docker Desktop, copy `.env.example` to `.env`, and set real development
 credentials. Do not commit `.env`.

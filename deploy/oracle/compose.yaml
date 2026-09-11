@@ -12,7 +12,11 @@ x-runtime: &runtime
     LOG_FORMAT: json
     FFMPEG_BIN: ffmpeg
     FFPROBE_BIN: ffprobe
-    TTS_BACKEND: ${CONTAINER_TTS_BACKEND:-espeak}
+    # Production voice identity is part of the product contract. Fail closed
+    # if Piper is unavailable instead of silently changing narrators.
+    TTS_BACKEND: piper
+    PIPER_BIN: piper
+    PIPER_MODEL: /app/voices/en_US-lessac-medium.onnx
     MAX_WORKERS: "2"
     MAX_VISUAL_WORKERS: "1"
   restart: unless-stopped

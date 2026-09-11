@@ -122,3 +122,23 @@ def test_oracle_environment_template_preserves_role_based_llm_routing():
     assert "CEREBRAS_DIRECTOR_MODEL=gpt-oss-120b" in template
     assert "GROQ_PLANNER_MODEL=qwen/qwen3.6-27b" in template
     assert "GROQ_FAST_PLANNER_MODEL=openai/gpt-oss-20b" in template
+
+
+def test_production_image_and_compose_pin_piper_voice():
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    oracle_compose = Path("deploy/oracle/compose.yaml").read_text(encoding="utf-8")
+    local_compose = Path("compose.production.yaml").read_text(encoding="utf-8")
+    environment = Path("deploy/oracle/production.env.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert "piper-tts==1.7.0" in Path("requirements.lock").read_text(encoding="utf-8")
+    assert "TTS_BACKEND=piper" in dockerfile
+    assert "PIPER_MODEL=/app/voices/en_US-lessac-medium.onnx" in dockerfile
+    assert "ADD --checksum=sha256:5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f" in dockerfile
+    for compose in (oracle_compose, local_compose):
+        assert "TTS_BACKEND: piper" in compose
+        assert "PIPER_BIN: piper" in compose
+        assert "PIPER_MODEL: /app/voices/en_US-lessac-medium.onnx" in compose
+    assert "TTS_SPEED_WPM=145" in environment
+    assert "CONTAINER_TTS_BACKEND" not in environment

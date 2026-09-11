@@ -11,7 +11,7 @@ Cloudflare -> Caddy on Oracle Ampere A1 -> web container
 
 The Oracle disk is scratch space and a short-lived render cache. Supabase
 private Storage remains authoritative for uploaded sources and generated
-videos. The Supabase `render_jobs` table is the durable queue; a VM restart
+videos. The Supabase `video_jobs` table is the durable queue; a VM restart
 does not discard queued work.
 
 ## 1. Create the VM
@@ -117,6 +117,8 @@ for investigation.
 3. Add the GitHub environment secrets and variables above.
 4. Run CI and require every job to pass.
 5. Run the manual `Release` workflow from `main`.
-6. Verify sign-in, quota reservation, one render, playback, account, and logout.
-7. Configure an external uptime check for `/readyz` and a weekly off-server
+6. Confirm `/readyz` reports `"tts":{"detail":"piper","ok":true}`.
+7. Verify sign-in, quota reservation, one render with the expected Lessac
+   voice, playback, account, and logout.
+8. Configure an external uptime check for `/readyz` and a weekly off-server
    database plus Storage export before accepting real user data.
