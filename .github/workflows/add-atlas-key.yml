@@ -1,0 +1,15 @@
+name: Add Atlas key
+on: workflow_dispatch
+jobs:
+  add:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add deploy key to server
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh -o StrictHostKeyChecking=accept-new ubuntu@129.154.254.32 \
+            'echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHTNW+NbQXQx+juuBNtrHRxkPUi0q1kOqzoX96DH7Y3Z atlas-explainora-deploy" >> ~/.ssh/authorized_keys'
